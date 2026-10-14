@@ -33,7 +33,7 @@ MESSAGE_1, MESSAGE_2, PRINT_LAYOUT = 0, 1, 2
 DISPLAY_FOV = 9.0       # a narrow view, as if standing back from the sign
 PRINT_FOV = 30.0
 TURN_TIME = 0.7         # seconds to swing from one message to the other
-MAGNET_COLOR = (0.72, 0.74, 0.78)
+POCKET_COLOR = (0.16, 0.17, 0.20)
 
 SIDE_NAMES = {0: ["Above", "Below"], 1: ["The left", "The right"]}
 
@@ -260,21 +260,25 @@ def sign_parts(d: SignDesign):
     return parts, d.fits_bed
 
 
-def magnet_mesh(d: SignDesign, sides: int = 40):
-    """The magnets sitting in their pockets, for the 3D view only: (verts, faces)."""
-    radius, top = 0.5 * d.p.magnet_d, d.p.magnet_t
+def pocket_mesh(d: SignDesign, sides: int = 48):
+    """The inside of each magnet pocket, for the 3D view only: (verts, faces).
+
+    A lining just inside the pocket's wall and roof, facing into it, drawn
+    dark so the pocket reads as a hole in the back.
+    """
+    radius, low, high = d.pocket_r - 0.02, 0.01, d.pocket_depth - 0.01
     ring = [(radius * math.cos(2 * math.pi * i / sides), radius * math.sin(2 * math.pi * i / sides))
             for i in range(sides)]
     verts, faces = [], []
     for x, y in d.pockets:
         base = len(verts)
-        verts += [(x + u, y + v, 0.0) for u, v in ring] + [(x + u, y + v, top) for u, v in ring]
-        verts += [(x, y, 0.0), (x, y, top)]
-        low, high = base + 2 * sides, base + 2 * sides + 1
+        verts += [(x + u, y + v, low) for u, v in ring] + [(x + u, y + v, high) for u, v in ring]
+        verts.append((x, y, high))
+        roof = base + 2 * sides
         for i in range(sides):
             j = (i + 1) % sides
-            faces += [(low, base + j, base + i), (high, base + sides + i, base + sides + j),
-                      (base + i, base + j, base + sides + j), (base + i, base + sides + j, base + sides + i)]
+            faces += [(base + i, base + sides + j, base + j), (base + i, base + sides + i, base + sides + j),
+                      (roof, base + sides + j, base + sides + i)]        # wall facing in; roof facing down
     return np.array(verts, dtype=np.float64), np.array(faces, dtype=np.int32)
 
 
@@ -933,10 +937,10 @@ class MainWindow(QMainWindow):
                 self.viewer.set_mesh(f"filament{fil}", *d.bodies[fil], colors[fil])
             else:
                 self.viewer.remove_mesh(f"filament{fil}")
-        if d.pockets:                          # the magnets themselves, so the back shows where they go
-            self.viewer.set_mesh("magnets", *magnet_mesh(d), MAGNET_COLOR)
+        if d.pockets:                          # the pockets drawn dark, so they read as holes
+            self.viewer.set_mesh("pockets", *pocket_mesh(d), POCKET_COLOR)
         else:
-            self.viewer.remove_mesh("magnets")
+            self.viewer.remove_mesh("pockets")
         self.viewer.set_bed(d.p.bed_x, d.p.bed_y)
         self.preview.set_design(d)
         for k in (MESSAGE_1, MESSAGE_2):
@@ -979,8 +983,11 @@ class MainWindow(QMainWindow):
                 "ridges.</p>")
             if d.pockets:
                 html.append(
-                    "<p class='k'><b>Magnets:</b> the pockets are open underneath and bridge over "
-                    f"{d.pocket_depth:.1f} mm up, with no supports. Glue the magnets in afterwards.</p>")
+                    "<p class='k'><b>Magnets:</b> the pockets are in the back, open underneath - on "
+                    "the bed, so in the slicer look from below, or at the first layers of the preview. "
+                    f"They bridge over {d.pocket_depth:.1f} mm up, so <b>leave supports off</b>: with "
+                    "supports on, the slicer fills each pocket with support. Glue the magnets in "
+                    "afterwards. The 3D view here shows each pocket as a dark hole in the back.</p>")
             fils = [str(f) for f in sorted(d.bodies)]
             listed = ", ".join(fils[:-1]) + (" and " if len(fils) > 1 else "") + fils[-1]
             html.append(
