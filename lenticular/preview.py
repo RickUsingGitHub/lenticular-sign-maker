@@ -89,6 +89,11 @@ class StripPreview(QWidget):
             tab.addPolygon(outline(hole))          # odd-even fill: a hole
             p.fillPath(tab, colors[d.p.base_fil].darker(108))
         p.fillPath(edge, colors[d.p.base_fil])                              # back and frame
+        e = d.edge_inset(d.top)
+        if e > 0:                                  # the chamfer or rounding round the face, shaded
+            flat = QPainterPath()
+            flat.addRoundedRect(QRectF(e, e, d.W - 2 * e, d.H - 2 * e), max(d.r - e, 0.0), max(d.r - e, 0.0))
+            p.fillPath(edge.subtracted(flat), colors[d.p.base_fil].darker(118))
         p.fillPath(face, colors[back_fil])
         p.setRenderHint(QPainter.Antialiasing, False)
         p.save()

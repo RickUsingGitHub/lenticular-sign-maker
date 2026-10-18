@@ -240,6 +240,19 @@ def check_mounting():
         assert len(m.pockets) == kw["mount_count"], (label, m.pockets, m.warnings)
         for x, y in m.pockets:
             assert abs(heights_at(m, x + 0.013, y + 0.021)[0] - m.pocket_depth) < 1e-9, label
+    mid4 = check_meshes(SignParams(mount=1, mount_count=5, magnet_d=6.0), "four small magnets together in the middle")
+    k = mid4.pocket_r + 0.6                               # side by side, a 1.2 mm wall between them
+    assert sorted(mid4.pockets) == sorted((sx * k, sy * k) for sx in (-1, 1) for sy in (-1, 1)), mid4.pockets
+    assert "4 pockets" in mid4.mounting() and "side by side in the middle" in mid4.mounting()
+    for x, y in mid4.pockets:
+        assert abs(heights_at(mid4, x + 0.013, y + 0.021)[0] - mid4.pocket_depth) < 1e-9
+    assert heights_at(mid4, 0.013, 0.021)[0] == 0.0       # solid in the middle of them ...
+    assert heights_at(mid4, k + 0.013, 0.021)[0] == 0.0   # ... and in the wall between two
+    check_views(mid4, "four magnets in the middle")
+    check_meshes(SignParams(mount=1, mount_count=5, magnet_d=8.0, roundness=2.0, width=80.0, edge_back=3,
+                            ridge_dir=1), "four magnets in the middle of a circle, chamfillet back")
+    small = SignDesign(SignParams(mount=1, mount_count=5, width=40.0, height=20.0))
+    assert not small.pockets and any("4 magnets of 10 mm do not fit" in w for w in small.warnings)
     crowded = SignDesign(SignParams(mount=1, mount_count=4, magnet_d=30.0))
     assert not crowded.pockets and any("do not fit" in w for w in crowded.warnings)
 
@@ -412,6 +425,98 @@ def check_flat():
     assert blank.flat_share() > 0.99                       # nothing to show: all flat
 
 
+def check_edges():
+    """Chamfered and rounded outer edges, and printing face down."""
+    cham = check_meshes(SignParams(edge_face=1, edge_face_size=1.0, edge_back=1, edge_back_size=0.6),
+                        "chamfered face and back")
+    x = 0.5 * cham.W                                      # the right-hand side, half way up
+    for w in (0.25, 0.5, 0.9):                            # in from the side: 45° slopes, face and back
+        hs = heights_at(cham, x - w, 0.013)
+        assert abs(hs[-1] - (cham.top - (1.0 - w))) < 1e-9 and abs(hs[0] - max(0.6 - w, 0.0)) < 1e-9, (w, hs)
+    hs = heights_at(cham, x - 1.2, 0.013)
+    assert hs[0] == 0.0 and abs(hs[-1] - cham.top) < 1e-9 and "a 1 mm chamfer" in cham.info()["Edges"]
+    check_views(cham, "chamfered edges")
+    rnd = check_meshes(SignParams(edge_face=2, edge_face_size=1.5, edge_back=2, edge_back_size=1.0, roundness=0.4),
+                       "rounded face and back, rounded corners")
+    for w in (0.3, 0.75, 1.2):                            # on the curve, in its flat facets
+        top = rnd.top - 1.5 + math.sqrt(1.5 ** 2 - (1.5 - w) ** 2)
+        low = 1.0 - math.sqrt(1.0 - (1.0 - w) ** 2) if w < 1.0 else 0.0
+        hs = heights_at(rnd, 0.5 * rnd.W - w, 0.013)
+        assert -0.05 < hs[-1] - top < 1e-9 and -1e-9 < hs[0] - low < 0.05, (w, hs, top, low)
+    check_views(rnd, "rounded edges")
+    check_meshes(SignParams(frame=8.0, edge_face=1, edge_face_size=3.0), "chamfer reaching down into the back")
+    check_meshes(SignParams(edge_face=2, edge_face_size=2.0, edge_back=2, edge_back_size=1.5, roundness=2.0,
+                            width=120.0), "rounded edges on a circle")
+    check_meshes(SignParams(edge_face=1, edge_face_size=2.0, edge_back=2, edge_back_size=1.0, roundness=0.05),
+                 "edges deeper than the corners are round")
+    check_meshes(SignParams(edge_face=2, edge_face_size=1.0, ridge_dir=1, roundness=1.0, ridges_where=1),
+                 "rounded face, upright ridges in a block")
+
+    cf = check_meshes(SignParams(edge_back=3, edge_back_size=1.6, edge_face=3, edge_face_size=1.5, roundness=0.3),
+                      "chamfillets, face and back")
+    R, knee, reach = 1.6, 1.6 * (1.0 - math.sqrt(0.5)), 1.6 * (2.0 - math.sqrt(2.0))
+    assert abs(cf.edge_inset(0.0) - reach) < 1e-9 and abs(cf.edge_inset(cf.top) - 1.5 * (2.0 - math.sqrt(2.0))) < 1e-9
+    for w, low in ((0.16, R - math.sqrt(R * R - (R - 0.16) ** 2)), (0.8, reach - 0.8), (1.0, 0.0)):
+        hs = heights_at(cf, 0.5 * cf.W - w, 0.013)       # round up the side, a 45° chamfer at the flat
+        assert -1e-9 < hs[0] - low < (0.05 if w < knee else 1e-9), (w, hs[0], low)
+    for z0, z1, way in ((0.0, cf.T, 1.0), (cf.T, cf.top, -1.0)):            # nothing flatter than 45°
+        zs = cf.edge_levels(z0, z1)
+        ws = [cf.edge_inset(z) for z in zs]
+        for za, zb, wa, wb in zip(zs, zs[1:], ws, ws[1:]):
+            assert zb - za >= abs(wb - wa) - 1e-9, (za, zb, wa, wb)
+    assert "chamfillet" in cf.info()["Edges"]
+    check_views(cf, "chamfillet edges")
+    check_meshes(SignParams(edge_face=3, edge_face_size=2.0, edge_back=3, edge_back_size=1.0, face_down=True,
+                            mount=1, mount_count=4, roundness=1.0), "chamfillets, magnets, face down")
+    narrow = SignDesign(SignParams(frame=1.5, edge_face=3, edge_face_size=3.0))
+    assert abs(narrow.edge_inset(narrow.top) - (1.5 - narrow.p.line_width)) < 1e-9     # reach, not size
+    assert any("chamfillet round the face is 1.84 mm" in w for w in narrow.warnings), narrow.warnings
+
+    big = SignDesign(SignParams(edge_face=1, edge_face_size=9.0, edge_back=2, edge_back_size=9.0))
+    assert big.edge_back == (2, big.T) and abs(big.edge_face[1] - (big.top - big.T - big.layer)) < 1e-9
+    assert sum("rather than the 9 mm set" in w for w in big.warnings) == 2, big.warnings
+    bare = SignDesign(SignParams(frame=0.0, edge_face=2))
+    assert bare.edge_face == (0, 0.0) and any("left square" in w for w in bare.warnings)
+
+    mag = check_meshes(SignParams(mount=1, mount_count=2, edge_back=2, edge_back_size=1.0, edge_face=1),
+                       "magnets, rounded back edge")
+    for x, y in mag.pockets:                              # the pockets are as they were
+        assert abs(heights_at(mag, x + 0.013, y + 0.021)[0] - mag.pocket_depth) < 1e-9
+        assert heights_at(mag, x + 5.3, y + 0.021)[0] == 0.0
+    tight = SignDesign(SignParams(mount=1, mount_count=2, mount_inset=1.5, edge_back=1, edge_back_size=1.0))
+    assert abs(tight.edge_back[1] - 0.5) < 1e-9 and any("magnet pockets" in w for w in tight.warnings)
+
+    hung = check_meshes(SignParams(mount=2, mount_count=2, edge_back=1, edge_back_size=1.0, edge_face=1),
+                        "eyelets, chamfered edges")
+    (_, _, (cx, cy)) = hung.tabs[0]
+    assert heights_at(hung, cx + 0.013, cy + 0.021) == []                            # the hole is open
+    edge = 0.5 * hung.W * (1 if cx > 0 else -1)
+    assert heights_at(hung, edge - 0.3 * np.sign(cx), cy + 0.021)[0] == 0.0         # joined on the bed
+    assert abs(heights_at(hung, edge - 0.3 * np.sign(cx), cy + 15.0)[0] - 0.7) < 1e-9   # the chamfer beside
+
+    down = check_meshes(SignParams(face_down=True, mount=2, mount_count=1, edge_face=1, edge_back=1),
+                        "printed face down, eyelets")
+    assert down.tab_top == down.top and any("face down" in n.lower() for n in down.notes)
+    (_, _, (cx, cy)) = down.tabs[0]
+    rim = heights_at(down, cx + 3.5, cy + 0.021)
+    assert rim[0] == 0.0 and abs(rim[-1] - down.top) < 1e-9                          # down to the bed
+    m = down.print_matrix()
+    heights = []
+    for fil, (verts, faces) in down.bodies.items():       # turned over, not mirrored
+        on_bed = verts @ m[:3, :3].T + m[:3, 3]
+        heights += [on_bed[:, 2].min(), on_bed[:, 2].max()]
+        assert abs(mesh_volume(on_bed, faces) - mesh_volume(verts, faces)) < 1e-6 * mesh_volume(verts, faces)
+    assert abs(min(heights)) < 1e-9 and abs(max(heights) - down.top) < 1e-9
+    crest = down.bodies[down.p.crest_fil][0] @ m[:3, :3].T + m[:3, 3]
+    assert (np.abs(crest[:, 2]) < 1e-9).sum() > 4 * down.n                          # the ridge tops on the bed
+    assert "face down" in down.info()["Printer bed"]
+    assert np.allclose(SignDesign(SignParams()).print_matrix(), np.identity(4))
+    steep = SignDesign(SignParams(face_down=True, view_angle=55.0))
+    assert any("droop" in w for w in steep.warnings), steep.warnings
+    assert any("rounded edge against the bed" in n for n in SignDesign(SignParams(edge_back=2)).notes)
+    print("edges and printing face down  OK")
+
+
 def check_viewing():
     """The angle a sign is really seen from."""
     near, middle, far = seen_angles(60.0, 800.0, 600.0)   # 80 cm below the eye, from 60 cm out
@@ -467,6 +572,7 @@ def main():
         check_pictures(tmp)
     check_layout()
     check_flat()
+    check_edges()
     check_viewing()
 
     bad = SignDesign(SignParams(crest=2.6))

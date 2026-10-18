@@ -10,7 +10,10 @@ FILE_FORMAT = "lenticular-sign"
 FILE_VERSION = 1
 FILAMENTS = (1, 2, 3, 4)
 NO_MOUNT, MAGNETS, EYELETS = 0, 1, 2
+FOUR_IN_MIDDLE = 5                              # mount_count: four magnets close together in the middle
 EVERYWHERE, BLOCK, WHERE_NEEDED = 0, 1, 2      # where the face has ridges
+SQUARE, CHAMFER, ROUNDED, CHAMFILLET = 0, 1, 2, 3   # how an edge of the sign is finished: a
+#                                                   chamfillet is rounded, then a 45° chamfer
 
 
 @dataclass
@@ -59,10 +62,17 @@ class SignParams:
     #                               (past 1 the shorter side grows to match the longer one)
     base_thickness: float = 2.0   # solid back under the ridges (mm)
     frame: float = 3.0            # flat rim round the ridges (mm, 0 = none)
+    edge_face: int = SQUARE       # the outer edge round the face: square, chamfered, rounded or
+    #                               a chamfillet (rounded where it meets the side, then a 45° chamfer)
+    edge_face_size: float = 1.0   # how far the chamfer or rounding reaches in and down (mm); for a
+    #                               chamfillet its radius: it reaches 0.59 x as far in
+    edge_back: int = SQUARE       # the outer edge round the back, likewise
+    edge_back_size: float = 0.6
 
     # --- mounting -----------------------------------------------------------
     mount: int = NO_MOUNT         # 1 = pockets in the back for magnets, 2 = eyelets to hang it by
-    mount_count: int = 1          # magnets: 1 (in the middle, to spin the sign on), 2 or 4;
+    mount_count: int = 1          # magnets: 1 (in the middle, to spin the sign on), 2, 4 (in the
+    #                               corners) or FOUR_IN_MIDDLE (smaller ones to spin on, side by side);
     #                               eyelets: 1 or 2
     magnet_d: float = 10.0        # magnet diameter (mm)
     magnet_t: float = 2.0         # magnet thickness (mm)
@@ -96,6 +106,7 @@ class SignParams:
     layer_height: float = 0.2     # the sign is a whole number of these thick
     line_width: float = 0.42      # the slicer's line width: nothing narrower gets printed
     min_detail: float = 0.5       # shortest piece of colour along a ridge (mm)
+    face_down: bool = False       # print it face down on the bed, the back on top
 
     # ---------------------------------------------------------------- utils
     def copy(self) -> "SignParams":
@@ -131,8 +142,10 @@ class SignParams:
             setattr(p, f.name, v)
         fresh = cls()
         allowed = {"crest_fil": (0,) + FILAMENTS, "mount": (NO_MOUNT, MAGNETS, EYELETS),
-                   "mount_count": (1, 2, 4), "ridge_dir": (0, 1), "view_side": (0, 1),
-                   "ridges_where": (EVERYWHERE, BLOCK, WHERE_NEEDED)}
+                   "mount_count": (1, 2, 4, FOUR_IN_MIDDLE), "ridge_dir": (0, 1), "view_side": (0, 1),
+                   "ridges_where": (EVERYWHERE, BLOCK, WHERE_NEEDED),
+                   "edge_face": (SQUARE, CHAMFER, ROUNDED, CHAMFILLET),
+                   "edge_back": (SQUARE, CHAMFER, ROUNDED, CHAMFILLET)}
         for key in ("text_fil1", "back_fil1", "text_fil2", "back_fil2", "base_fil"):
             allowed[key] = FILAMENTS
         for key in ("text_dir1", "text_dir2", "image_at1", "image_at2"):

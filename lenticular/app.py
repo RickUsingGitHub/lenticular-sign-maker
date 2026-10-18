@@ -19,8 +19,9 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QComboBox,
 
 from . import __version__
 from .geometry import SignDesign
-from .params import (BLOCK, EVERYWHERE, EYELETS, FILAMENTS, MAGNETS, NO_MOUNT, WHERE_NEEDED, SignParams,
-                     load_design, outline_size, save_design)
+from .params import (BLOCK, CHAMFER, CHAMFILLET, EVERYWHERE, EYELETS, FILAMENTS, FOUR_IN_MIDDLE, MAGNETS,
+                     NO_MOUNT, ROUNDED, SQUARE, WHERE_NEEDED, SignParams, load_design, outline_size,
+                     save_design)
 from .preview import StripPreview
 from .stl import write_stl
 from .threemf import write_3mf
@@ -41,6 +42,7 @@ TEXT_RUNS = [(0, "Across"), (1, "Down, letters upright"), (2, "Turned, reading u
              (3, "Turned, reading downwards")]
 PICTURE_AT = [(0, "Left of the text"), (1, "Right of the text"), (2, "Above the text"),
               (3, "Below the text")]
+EDGE_STYLES = [(SQUARE, "Square"), (CHAMFER, "Chamfered"), (ROUNDED, "Rounded"), (CHAMFILLET, "Chamfillet")]
 
 
 def _message(k: int, example: str, extra: str = "") -> tuple:
@@ -101,6 +103,18 @@ SPEC = [
          "Thickness of the solid back under the ridges. It is adjusted by up to half a layer\n"
          "so the whole sign is a whole number of layers thick, and made thicker if magnet\n"
          "pockets need it."),
+        ("edge_face", "Face edge", "edge", 0.1, 20.0, 0.2, "edge_face_size",
+         "The outer edge round the face: square, chamfered (cut off at 45°), rounded, or a\n"
+         "chamfillet - and how far it reaches in from the side and down from the face.\n"
+         "A chamfillet is a rounding made printable: round where it meets the side, then a 45°\n"
+         "chamfer where the curve would get flatter than that, so on the bed no part of it\n"
+         "overhangs more than 45°. Its size is the radius; it reaches 0.59 × that far in.\n"
+         "The face edge is cut from the frame, so it is kept narrower than the frame."),
+        ("edge_back", "Back edge", "edge", 0.1, 20.0, 0.2, "edge_back_size",
+         "The outer edge round the back, likewise. It is kept within the back's thickness.\n"
+         "On the bed, a plain rounding overhangs where it meets the bed and may sag a little:\n"
+         "a chamfillet or a chamfer prints cleanly, and also stops the first layer squashing\n"
+         "out into a lip."),
     ]),
     ("Mounting", [
         ("mount", "Fix it with", "choice", [(NO_MOUNT, "Nothing built in"), (MAGNETS, "Magnets in the back"),
@@ -108,9 +122,12 @@ SPEC = [
          "Magnets: round pockets in the back, open underneath, to glue disc magnets into. They\n"
          "are placed evenly, so the sign sits the same either way up.\n"
          "Eyelets: flat rings on the edge, as thick as the back, for a hook, nail or cord."),
-        ("mount_count", "How many", "choice", [(1, "One"), (2, "Two"), (4, "Four")], None, None, "",
+        ("mount_count", "How many", "choice", [(1, "One"), (FOUR_IN_MIDDLE, "Four, in the middle"), (2, "Two"),
+                                               (4, "Four")], None, None, "",
          "Magnets: one in the middle - the sign spins on it, which suits one that is turned\n"
-         "over to change - or two at the ends of the longer side, or four in the corners.\n"
+         "over to change - or four side by side in a square round the middle, to spin on when\n"
+         "you only have smaller magnets - or two at the ends of the longer side, or four in\n"
+         "the corners.\n"
          "Eyelets: one at the top - and one at the bottom too, if the sign is turned over to\n"
          "change - or two, at the ends of the longer side."),
         ("magnet_d", "Magnet diameter", "float", 2.0, 100.0, 1.0, " mm",
@@ -179,6 +196,12 @@ SPEC = [
          "the other, and it needs the slicer's Arachne wall generator to print the narrow tops."),
     ]),
     ("Printer", [
+        ("face_down", "Print face down", "bool", None, None, None, "",
+         "Off: the sign prints flat on its back, ridges up.\n"
+         "On: it is exported turned over, face down on the bed with the back on top. The frame\n"
+         "and ridge tops then take the bed's finish, magnet pockets open upwards, and eyelets\n"
+         "are made as thick as the whole sign so they rest on the bed. The ridges still print\n"
+         "without supports while their flanks are 45° or steeper (a viewing angle of 45° or less)."),
         ("bed_x", "Bed width", "float", 30.0, 2000.0, 5.0, " mm",
          "Width of the printer bed. The sign is checked against it and placed at its centre."),
         ("bed_y", "Bed depth", "float", 30.0, 2000.0, 5.0, " mm", "Depth of the printer bed."),
@@ -197,8 +220,8 @@ SPEC = [
 # Settings shown in Simple mode; the rest appear only in Detailed mode.
 SIMPLE_KEYS = {"text1", "font1", "bold1", "size1", "text_fil1", "back_fil1",
                "text2", "font2", "bold2", "size2", "text_fil2", "back_fil2",
-               "width", "height", "roundness", "mount", "ridge_dir", "flip", "view_side", "ridges_where",
-               "color1", "color2", "color3", "color4", "base_fil"}
+               "width", "height", "roundness", "edge_face", "edge_back", "mount", "ridge_dir", "flip",
+               "view_side", "ridges_where", "color1", "color2", "color3", "color4", "base_fil", "face_down"}
 PICTURE_FILES = "Pictures (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.svg);;All files (*)"
 
 REMEMBERED = ("bed_x", "bed_y", "layer_height", "line_width")   # printer settings kept for new designs
@@ -249,13 +272,16 @@ def make_app_icon() -> QIcon:
 
 
 def sign_parts(d: SignDesign):
-    """The sign for write_3mf, as it lies on the bed: (parts, fits the bed)."""
+    """The sign for write_3mf, as it lies on the bed: (parts, fits the bed).
+
+    Face down if asked, and turned a quarter turn if that makes it fit.
+    """
     colors = d.p.colors()
+    m = d.print_matrix()
     parts = []
     for fil in sorted(d.bodies):
         verts, faces = d.bodies[fil]
-        if d.turn_on_bed:                       # a quarter turn makes it fit
-            verts = verts[:, [1, 0, 2]] * (-1.0, 1.0, 1.0)
+        verts = verts @ m[:3, :3].T + m[:3, 3]  # a turn, not a mirror: the faces still face out
         parts.append((d.part_name(fil), verts, faces, fil, colors[fil]))
     return parts, d.fits_bed
 
@@ -521,7 +547,7 @@ class MainWindow(QMainWindow):
             row.addWidget(b)
             self.view_btns.append(b)
         self.view_btns[self.view].setChecked(True)
-        self.view_btns[PRINT_LAYOUT].setToolTip("The sign as it prints: flat on its back on the bed (Ctrl+3)")
+        self.view_btns[PRINT_LAYOUT].setToolTip("The sign as it prints, on the bed (Ctrl+3)")
         h.addLayout(row)
         h.addSpacing(12)
         hint = QLabel("Drag to tilt the sign and watch the message change")
@@ -569,6 +595,14 @@ class MainWindow(QMainWindow):
             return w
         elif kind == "pair":                      # sideways and up, side by side
             return row(spin(key, " mm", prefix="→ "), spin(extra, " mm", prefix="↑ "))
+        elif kind == "edge":                      # how an edge is finished, and how far it reaches
+            w = QComboBox()
+            for value, label in EDGE_STYLES:
+                w.addItem(label, value)
+            w.setCurrentIndex(max(0, w.findData(val)))
+            w.currentIndexChanged.connect(lambda i, k=key, ww=w: self._on_param(k, ww.itemData(i)))
+            self.widgets[key] = w
+            return row(w, spin(extra, " mm"))
         elif kind == "angle":                     # the viewing angle, and a way to work it out
             helper = QToolButton()
             helper.setText("Work out…")
@@ -716,6 +750,8 @@ class MainWindow(QMainWindow):
         side = self.widgets["view_side"]
         for i, text in enumerate(SIDE_NAMES[p.ridge_dir]):
             side.setItemText(i, text)
+        for key in ("edge_face", "edge_back"):    # a square edge has no size
+            self.widgets[f"{key}_size"].setEnabled(getattr(p, key) != SQUARE)
         # the shape: what the slider's position means, and which side it has taken over
         w, h, r = outline_size(p)
         if p.roundness <= 0:
@@ -736,7 +772,8 @@ class MainWindow(QMainWindow):
             places = {1: "One at the top, one at the bottom" if p.flip else "One, at the top",
                       2: "Two, at the ends"}
         else:
-            places = {1: "One, in the middle", 2: "Two, at the ends", 4: "Four, in the corners"}
+            places = {1: "One, in the middle", FOUR_IN_MIDDLE: "Four, together in the middle",
+                      2: "Two, at the ends", 4: "Four, in the corners"}
         counts = self.widgets["mount_count"]
         if [(counts.itemData(i), counts.itemText(i)) for i in range(counts.count())] != list(places.items()):
             counts.blockSignals(True)
@@ -895,8 +932,8 @@ class MainWindow(QMainWindow):
         setattr(self.params, key, value)
         if key in REMEMBERED:
             self.settings.setValue(f"default_{key}", float(value))
-        if self.params.mount == EYELETS and self.params.mount_count == 4:     # eyelets: one or two
-            self.params.mount_count = 2
+        if self.params.mount == EYELETS and self.params.mount_count not in (1, 2):     # eyelets: one or two
+            self.params.mount_count = 1 if self.params.mount_count == FOUR_IN_MIDDLE else 2
             self._refresh_widgets()
         self._sync_widgets()
         self._dirty = True
@@ -949,6 +986,8 @@ class MainWindow(QMainWindow):
             self.view_btns[k].setText(f"{'①②'[k]} {short}")
             self.view_btns[k].setToolTip(f"The sign as “{label}” is read: {d.seen(k)} (Ctrl+{k + 1})")
             self.view_actions[k].setText(f"Message {k + 1}: {short}")
+        lies = "face down on the bed, the back on top" if d.p.face_down else "flat on its back on the bed"
+        self.view_btns[PRINT_LAYOUT].setToolTip(f"The sign as it prints: {lies} (Ctrl+3)")
         self._apply_view()
         self._show_info(d, [], d.warnings)
         dt = time.perf_counter() - t0
@@ -975,13 +1014,24 @@ class MainWindow(QMainWindow):
             html.append("</ul>")
         if d is not None:
             changes, layers, _ = d.colour_changes()
+            if d.p.face_down:
+                how = ("face down on the bed, the back on top, no supports: the exported file is already "
+                       "turned over")
+                where = f"first {layers} layers"
+            else:
+                how, where = "flat on its back, ridges up, no supports", f"top {layers} layers"
             html.append(
-                "<p class='k'><b>Printing:</b> flat on its back, ridges up, no supports. Slice at "
-                f"<b>{d.layer:g} mm</b> layers, the height the sign is built for. The colours only meet "
-                f"in the top {layers} layers (the ridges), so there are about {changes} filament "
-                "changes. Use 100% infill or 4+ top layers so the back prints solid under the "
-                "ridges.</p>")
-            if d.pockets:
+                f"<p class='k'><b>Printing:</b> {how}. Slice at <b>{d.layer:g} mm</b> layers, the height "
+                f"the sign is built for. The colours only meet in the {where} (the ridges), so there "
+                f"are about {changes} filament changes. Use 100% infill or 4+ top and bottom layers so "
+                "the back prints solid.</p>")
+            if d.pockets and d.p.face_down:
+                html.append(
+                    "<p class='k'><b>Magnets:</b> the pockets are in the back, which is on top when the "
+                    "sign prints face down, so they print as open pockets with nothing to bridge. Glue "
+                    "the magnets in afterwards. The 3D view here shows each pocket as a dark hole in "
+                    "the back.</p>")
+            elif d.pockets:
                 html.append(
                     "<p class='k'><b>Magnets:</b> the pockets are in the back, open underneath - on "
                     "the bed, so in the slicer look from below, or at the first layers of the preview. "
@@ -1049,10 +1099,7 @@ class MainWindow(QMainWindow):
         if standing:
             v.set_model(standing_transform(self.turn, 0.5 * d.top))
         else:
-            lie = np.identity(4)
-            if d.turn_on_bed:                 # a quarter turn, as it is exported
-                lie[:2, :2] = [[0, -1], [1, 0]]
-            v.set_model(lie)
+            v.set_model(d.print_matrix())     # as it is exported: face down, a quarter turn, if so
         size = float(np.linalg.norm([d.W, d.H, d.top]))
         if (self._fitted is None or self._fitted[0] != standing
                 or abs(size - self._fitted[1]) > 0.1 * self._fitted[1]):
@@ -1272,7 +1319,8 @@ class MainWindow(QMainWindow):
             "ridge carries the first message and the other flank the second.</p>"
             "<p><b>3D view:</b> left-drag tilt · right-drag / shift-drag pan · wheel zoom · "
             "double-click or F to go back to the chosen view.</p>"
-            "<p>Exports are in millimetres, flat on the back and ready to print.</p>")
+            "<p>Exports are in millimetres, on the back (or face down, if chosen) and ready to "
+            "print.</p>")
 
     def closeEvent(self, ev):
         if not self._confirm_discard():

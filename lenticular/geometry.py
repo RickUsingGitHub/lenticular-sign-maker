@@ -15,6 +15,12 @@ semicircular ends, or a circle.  Where it curves, the ridges are cut to follow
 it: the end of a ridge is sliced into narrow strips, each with a flat end, and
 the frame's inner edge runs through the same corners so the two meet exactly.
 
+The outer edges round the face and the back can be chamfered, rounded, or
+given a chamfillet - rounded where it meets the side, then a 45° chamfer where
+the curve would get flatter than that, so it never overhangs more than 45° on
+the bed.  The side of the sign is then a stack of outlines, each moved in by
+the right amount for its height, joined by flat facets.
+
 The model is a set of closed shells sorted by filament: the back, the frame
 and every stretch of ridge.  Shells of one filament touch face to face and
 the slicer joins them; no shell overlaps another.
@@ -27,8 +33,8 @@ import os
 
 import numpy as np
 
-from .params import (BLOCK, EVERYWHERE, EYELETS, FILAMENTS, MAGNETS, WHERE_NEEDED, SignParams,
-                     outline_size)
+from .params import (BLOCK, CHAMFER, CHAMFILLET, EVERYWHERE, EYELETS, FILAMENTS, FOUR_IN_MIDDLE, MAGNETS,
+                     ROUNDED, SQUARE, WHERE_NEEDED, SignParams, outline_size)
 from .textimage import ACROSS, STACKED, TextShape, load_picture
 
 PLUS, MINUS = 0, 1        # the ridge flank facing +u / facing -u
@@ -39,8 +45,10 @@ ARC_TOL = 0.02            # how far a flat facet may stray from a round outline 
 WELD = 1e-6               # ends closer together than this are one point (mm)
 POCKET_FIT = 0.1          # a magnet pocket is this much bigger all round than its magnet (mm)
 POCKET_ROOF = 0.6         # back left over a magnet pocket (mm)
+POCKET_WALL = 1.2         # between the four magnet pockets grouped in the middle (mm)
 EYELET_WALL = 3.0         # width of the ring round an eyelet's hole (mm)
 EYELET_GAP = 1.5          # from the sign's edge to the hole (mm)
+POCKET_CLEAR = 1.0        # solid left between a magnet pocket and a chamfered or rounded back edge (mm)
 
 
 def mesh_volume(verts: np.ndarray, faces: np.ndarray) -> float:
@@ -85,6 +93,27 @@ def _between(pts, ua, ub):
         if len(pts) < 3:
             return []
     return _clean(pts)
+
+
+def edge_reach(style: int) -> float:
+    """How far an edge of each style reaches in across the face, per mm of its size."""
+    return 2.0 - math.sqrt(2.0) if style == CHAMFILLET else 1.0
+
+
+def edge_profile(style: int, size: float, h: float) -> float:
+    """How far in from the outline a chamfered or rounded edge is, h up from the flat it meets.
+
+    Chamfer: 45°.  Rounded: a quarter circle of radius size.  Chamfillet: the
+    same quarter circle down to where it is 45° steep, and a 45° chamfer from
+    there to the flat - so it reaches size up the side but only 0.59 x size in.
+    """
+    if style == SQUARE or size <= 0 or h >= size:
+        return 0.0
+    if style == CHAMFER:
+        return size - h
+    if style == CHAMFILLET and h <= size * (1.0 - math.sqrt(0.5)):
+        return edge_reach(CHAMFILLET) * size - h
+    return size - math.sqrt(max(size * size - (size - h) ** 2, 0.0))
 
 
 def rounded_outline(U: float, V: float, r: float) -> list:
@@ -219,45 +248,115 @@ class _Shells:
         round the two outlines in order of direction from ``centre`` - a point
         inside both; the middle of the outer one if not given.
         """
-        outer, inner = _clean(outer, 1e-7), _clean(inner, 1e-7)
-        na, nb = len(outer), len(inner)
-        if na < 3 or nb < 3 or z1 - z0 <= 1e-9:
-            return
-        cu, cv = centre or (sum(q[0] for q in outer) / na, sum(q[1] for q in outer) / na)
-        ang_a = np.unwrap([math.atan2(v - cv, u - cu) for u, v in outer])
-        raw = np.array([math.atan2(v - cv, u - cu) for u, v in inner])
-        off = np.angle(np.exp(1j * (raw - ang_a[0])))
-        j0 = int(np.argmin(np.abs(off)))            # start the inner outline beside outer[0]
-        inner = inner[j0:] + inner[:j0]
-        ang_b = np.unwrap(np.roll(raw, -j0))
-        ang_b += ang_a[0] + off[j0] - ang_b[0]
-        ang_a = np.append(ang_a, ang_a[0] + 2.0 * math.pi)
-        ang_b = np.append(ang_b, ang_b[0] + 2.0 * math.pi)
+        outer = _clean(outer, 1e-7)
+        self.ring_loft([(z0, outer), (z1, outer)], inner, centre)
 
-        base = len(self.verts)
-        a_lo, a_hi, b_lo, b_hi = base, base + na, base + 2 * na, base + 2 * na + nb
-        for z in (z0, z1):
-            self.verts += [(u, v, z) for u, v in outer]
-        for z in (z0, z1):
-            self.verts += [(u, v, z) for u, v in inner]
-        i = j = 0
-        while i < na or j < nb:
-            if j >= nb or (i < na and ang_a[i + 1] <= ang_b[j + 1]):
-                tri = ((0, i % na), (0, (i + 1) % na), (1, j % nb))
-                i += 1
-            else:
-                tri = ((1, j % nb), (0, i % na), (1, (j + 1) % nb))
-                j += 1
-            top = tuple((a_hi, b_hi)[which] + k for which, k in tri)
-            under = tuple((a_lo, b_lo)[which] + k for which, k in tri)
-            self.faces += [top, under[::-1]]
-        for i in range(na):                          # outer wall
-            j = (i + 1) % na
-            self.faces += [(a_lo + i, a_lo + j, a_hi + j), (a_lo + i, a_hi + j, a_hi + i)]
+    def _rows(self, levels):
+        """The corners of each (z, outline) level as vertices: one list of vertex numbers per level.
+
+        Corners that fall together - a round corner moved in past its radius
+        becomes a sharp one - share one vertex.
+        """
+        rows = []
+        for z, pts in levels:
+            row, last = [], None
+            for u, v in pts:
+                if last is not None and abs(u - last[0]) <= WELD and abs(v - last[1]) <= WELD:
+                    row.append(row[-1])
+                else:
+                    row.append(len(self.verts))
+                    self.verts.append((u, v, z))
+                    last = (u, v)
+            first = self.verts[row[0]]
+            if row[-1] != row[0] and abs(last[0] - first[0]) <= WELD and abs(last[1] - first[1]) <= WELD:
+                self.verts.pop()                        # the last corners are the first one again
+                row = [row[0] if i == row[-1] else i for i in row]
+            rows.append(row)
+        return rows
+
+    def _walls(self, rows):
+        """The side between each level and the next (anticlockwise outlines face outwards)."""
+        for lo, hi in zip(rows, rows[1:]):
+            k = len(lo)
+            for i in range(k):
+                j = (i + 1) % k
+                for f in ((lo[i], lo[j], hi[j]), (lo[i], hi[j], hi[i])):
+                    if len(set(f)) == 3:
+                        self.faces.append(f)
+
+    def loft(self, levels):
+        """A column whose outline changes with height.
+
+        levels: (z, corners) from the bottom up, each a convex outline,
+        anticlockwise, with the same number of corners in the same order.
+        """
+        if len(levels) < 2 or levels[-1][0] - levels[0][0] <= 1e-9:
+            return
+        rows = self._rows(levels)
+        self._walls(rows)
+        for row, up in ((rows[0], False), (rows[-1], True)):
+            ring = [i for n, i in enumerate(row) if i != row[n - 1]] if len(set(row)) > 1 else []
+            for i in range(1, len(ring) - 1):
+                self.faces.append((ring[0], ring[i], ring[i + 1]) if up else (ring[0], ring[i + 1], ring[i]))
+        self.count += 1
+
+    def ring_loft(self, levels, inner, centre=None):
+        """The solid between an outer outline that may change with height and an inner one.
+
+        levels: as for loft.  inner: a convex outline inside every level,
+        anticlockwise, upright from the lowest level to the highest.
+        """
+        inner = _clean(inner, 1e-7)
+        nb = len(inner)
+        if nb < 3 or len(levels) < 2 or levels[-1][0] - levels[0][0] <= 1e-9:
+            return
+        rows = self._rows(levels)
+        z0, z1 = levels[0][0], levels[-1][0]
+        b_lo = len(self.verts)
+        self.verts += [(u, v, z0) for u, v in inner]
+        b_hi = len(self.verts)
+        self.verts += [(u, v, z1) for u, v in inner]
+        for row, b, up in ((rows[0], b_lo, False), (rows[-1], b_hi, True)):
+            ring = [i for n, i in enumerate(row) if i != row[n - 1]]
+            outer = [self.verts[i][:2] for i in ring]
+            for tri in _lace(outer, inner, centre):
+                f = tuple(ring[k] if which == 0 else b + k for which, k in tri)
+                self.faces.append(f if up else f[::-1])
+        self._walls(rows)                            # outer wall
         for i in range(nb):                          # inner wall, facing the middle
             j = (i + 1) % nb
             self.faces += [(b_lo + i, b_hi + j, b_lo + j), (b_lo + i, b_hi + i, b_hi + j)]
         self.count += 1
+
+
+def _lace(outer, inner, centre=None):
+    """Triangles that fill the space between two convex outlines, one inside the other.
+
+    Both anticlockwise.  Laced by stepping round the two in order of direction
+    from ``centre`` - a point inside both; the middle of the outer one if not
+    given.  Each corner is (0, number in outer) or (1, number in inner), and
+    each triangle is anticlockwise seen from above.
+    """
+    na, nb = len(outer), len(inner)
+    cu, cv = centre or (sum(q[0] for q in outer) / na, sum(q[1] for q in outer) / na)
+    ang_a = np.unwrap([math.atan2(v - cv, u - cu) for u, v in outer])
+    raw = np.array([math.atan2(v - cv, u - cu) for u, v in inner])
+    off = np.angle(np.exp(1j * (raw - ang_a[0])))
+    j0 = int(np.argmin(np.abs(off)))                # start the inner outline beside outer[0]
+    ang_b = np.unwrap(np.roll(raw, -j0))
+    ang_b += ang_a[0] + off[j0] - ang_b[0]
+    ang_a = np.append(ang_a, ang_a[0] + 2.0 * math.pi)
+    ang_b = np.append(ang_b, ang_b[0] + 2.0 * math.pi)
+    tris = []
+    i = j = 0
+    while i < na or j < nb:
+        if j >= nb or (i < na and ang_a[i + 1] <= ang_b[j + 1]):
+            tris.append(((0, i % na), (0, (i + 1) % na), (1, (j0 + j) % nb)))
+            i += 1
+        else:
+            tris.append(((1, (j0 + j) % nb), (0, i % na), (1, (j0 + j + 1) % nb)))
+            j += 1
+    return tris
 
 
 def _period_means(summed: np.ndarray, extent: float, a: float, b: float) -> np.ndarray:
@@ -341,8 +440,8 @@ class SignDesign:
             err.append("The viewing angle must be between 10° and 75°.")
         if p.base_thickness < 0.2:
             err.append("The back must be at least 0.2 mm thick.")
-        if p.crest < 0 or p.frame < 0 or p.margin < 0:
-            err.append("Crest, frame and margin cannot be negative.")
+        if p.crest < 0 or p.frame < 0 or p.margin < 0 or p.edge_face_size < 0 or p.edge_back_size < 0:
+            err.append("Crest, frame, margin and edge sizes cannot be negative.")
         elif p.crest > p.pitch - 0.6:
             err.append(f"The crest ({p.crest:g} mm) leaves no room for the ridge flanks: keep it "
                        f"at least 0.6 mm narrower than the pitch ({p.pitch:g} mm).")
@@ -413,6 +512,7 @@ class SignDesign:
         self.fil = {self.side_of[0]: (p.text_fil1, p.back_fil1),         # flank -> (letters, behind)
                     self.side_of[1]: (p.text_fil2, p.back_fil2)}
         self._mounting()
+        self._edges()
 
     def _mounting(self):
         """Where the magnet pockets or the hanging eyelets go (x, y from the sign's centre)."""
@@ -424,6 +524,9 @@ class SignDesign:
             e = p.mount_inset + self.pocket_r     # from the outline in to a pocket's centre
             if p.mount_count == 1:
                 pts = [(0.0, 0.0)]
+            elif p.mount_count == FOUR_IN_MIDDLE:  # side by side in a square round the middle: the sign
+                k = self.pocket_r + 0.5 * POCKET_WALL     # still spins about its middle, held by four
+                pts = [(sx * k, sy * k) for sx in (-1, 1) for sy in (-1, 1)]
             elif p.mount_count == 2:              # at the two ends of the longer side
                 pts = ([(-(0.5 * W - e), 0.0), (0.5 * W - e, 0.0)] if W >= H
                        else [(0.0, -(0.5 * H - e)), (0.0, 0.5 * H - e)])
@@ -432,9 +535,11 @@ class SignDesign:
                 cx, cy = (0.5 * W - e, 0.5 * H - e) if k is None else (0.5 * W - r + k, 0.5 * H - r + k)
                 pts = [(sx * cx, sy * cy) for sx in (-1, 1) for sy in (-1, 1)]
             apart = min((math.dist(a, c) for i, a in enumerate(pts) for c in pts[i + 1:]), default=1e9)
-            if e > 0.5 * min(W, H) or apart < 2 * self.pocket_r + 2.0:
+            wall = POCKET_WALL if p.mount_count == FOUR_IN_MIDDLE else 2.0
+            room = min(self.inside_by(x, y) for x, y in pts) - self.pocket_r
+            if room < p.mount_inset - 1e-9 or apart < 2 * self.pocket_r + wall - 1e-9:
                 self.warnings.append(
-                    f"{p.mount_count} magnets of {p.magnet_d:g} mm do not fit this sign {p.mount_inset:g} "
+                    f"{len(pts)} magnets of {p.magnet_d:g} mm do not fit this sign {p.mount_inset:g} "
                     f"mm in from its edge, so they are left out. Use smaller or fewer magnets.")
             else:
                 self.pockets = pts
@@ -467,6 +572,126 @@ class SignDesign:
                 self.tabs.append((outer, hole, (cx, cy)))
             stick = out + rim
             self.reach = (stick, 0.0) if spots is sides else (0.0, stick)
+
+    def _edges(self):
+        """How far the chamfer or rounding of each outer edge reaches, kept to what fits.
+
+        Sets ``edge_back`` and ``edge_face`` to (style, size in mm) - size 0 for
+        a square edge - and ``tab_top``, the height of the eyelets.  Eyelets
+        reach in over a bent edge, so nothing is lost where they join.
+        """
+        p, lh = self.p, self.layer
+        line = min(max(p.line_width, 0.1), 2.0)
+        self.edge_back = self.edge_face = (SQUARE, 0.0)
+
+        def fit(style, want, where, limits):
+            """(style, size): want, or the tightest of limits ((most, why), ...) if smaller.
+
+            Each limit is on the size, except those marked "in", which are on how far
+            the edge reaches in across the face.
+            """
+            if style == SQUARE or want <= 0:
+                return (SQUARE, 0.0)
+            most, why = min(((m / edge_reach(style) if inward else m, why) for m, why, inward in limits),
+                            key=lambda lim: lim[0])
+            what = {CHAMFER: "chamfer", ROUNDED: "rounding", CHAMFILLET: "chamfillet"}[style]
+            if most < 0.1:
+                self.warnings.append(f"There is no room for a {what} round the {where}, so that edge is "
+                                     f"left square: {why}.")
+                return (SQUARE, 0.0)
+            if want > most + 1e-9:
+                self.warnings.append(f"The {what} round the {where} is {most:.2f} mm rather than the "
+                                     f"{want:g} mm set: {why}.")
+                return (style, most)
+            return (style, want)
+
+        limits = [(self.T, "it is kept within the back's thickness", False)]
+        if self.pockets:
+            gap = min(self.inside_by(x, y) for x, y in self.pockets) - self.pocket_r
+            limits.append((gap - POCKET_CLEAR, f"it stays {POCKET_CLEAR:g} mm clear of the magnet pockets",
+                           True))
+        self.edge_back = fit(p.edge_back, p.edge_back_size, "back", limits)
+        limits = [(self.b - line, f"it leaves a {line:g} mm line of flat frame round the ridges", True),
+                  (self.top - self.edge_back[1] - lh, "it stops short of the back edge", False)]
+        if self.pockets:
+            limits.append((self.top - self.pocket_depth - POCKET_ROOF, "it stays clear of the magnet pockets",
+                           False))
+        if self.b <= 0:
+            limits = [(0.0, "it is cut from the frame, and the sign has none", False)]
+        self.edge_face = fit(p.edge_face, p.edge_face_size, "face", limits)
+
+        # eyelets rest on the bed: printed face down they are as thick as the whole sign
+        self.tab_top = self.top if p.face_down else self.T
+        reach = max(self.edge_inset(z) for z in self.edge_levels(0.0, self.tab_top))
+        if reach > 1e-9:                          # past the chord they join along, over the bent edge
+            tabs = []
+            for rim, hole, (cx, cy) in self.tabs:
+                (ax, ay), (bx, by) = rim[0], rim[-1]
+                mx, my = 0.5 * (ax + bx), 0.5 * (ay + by)
+                k = math.hypot(cx - mx, cy - my)
+                nx, ny = (cx - mx) / k, (cy - my) / k
+                tabs.append((rim + [(bx - reach * nx, by - reach * ny), (ax - reach * nx, ay - reach * ny)],
+                             hole, (cx, cy)))
+            self.tabs = tabs
+
+    def inside_by(self, x: float, y: float) -> float:
+        """How far a point (from the sign's centre) is inside the outline."""
+        W2, H2, r = 0.5 * self.W - self.r, 0.5 * self.H - self.r, self.r
+        qx, qy = abs(x) - W2, abs(y) - H2
+        return r - math.hypot(max(qx, 0.0), max(qy, 0.0)) - min(max(qx, qy), 0.0)
+
+    def edge_inset(self, z: float) -> float:
+        """How far in from the outline the side of the sign is at height z."""
+        return max(edge_profile(*self.edge_back, z), edge_profile(*self.edge_face, self.top - z))
+
+    def edge_levels(self, z0: float, z1: float) -> list:
+        """Heights from z0 to z1 where the side of the sign bends.
+
+        Its outline at each height is joined to the next by flat facets: a
+        rounding is stepped closely enough that they stray from the curve by
+        no more than ARC_TOL.
+        """
+        zs = {z0, z1}
+        for (style, size), start, way in ((self.edge_back, 0.0, 1.0), (self.edge_face, self.top, -1.0)):
+            if size <= 0:
+                continue
+            zs.add(start)
+            if style == CHAMFER:
+                zs.add(start + way * size)
+            else:                                 # a quarter circle - or its steeper half, for a chamfillet
+                a0 = 0.25 * math.pi if style == CHAMFILLET else 0.0
+                step = 2.0 * math.acos(max(1.0 - ARC_TOL / size, 0.0))
+                n = max(2 if style == ROUNDED else 1, int(math.ceil((0.5 * math.pi - a0) / step)))
+                zs |= {start + way * size * (1.0 - math.cos(a0 + (0.5 * math.pi - a0) * i / n))
+                       for i in range(n + 1)}
+        out = []
+        for z in sorted(z for z in zs if z0 - 1e-9 <= z <= z1 + 1e-9):
+            z = min(max(z, z0), z1)
+            if not out or z - out[-1] > 1e-9:
+                out.append(z)
+        out[-1] = z1
+        return out
+
+    def inset_outline(self, pts, w: float) -> list:
+        """The outline (its corners, as from rounded_outline) moved in by w, corner for corner.
+
+        A round corner keeps its centre and loses w from its radius; moved in
+        further than its radius, it becomes a sharp corner and its corners fall
+        together.
+        """
+        if w <= 0:
+            return list(pts)
+        U, V, r = self.U, self.V, self.r
+        out = []
+        for u, v in pts:
+            cu, cv = min(max(u, r), U - r), min(max(v, r), V - r)      # the corner's centre
+            if r > 0 and w <= r:
+                k = 1.0 - w / r
+                out.append((cu + (u - cu) * k, cv + (v - cv) * k))
+            else:
+                su, sv = (1.0 if u > 0.5 * U else -1.0), (1.0 if v > 0.5 * V else -1.0)
+                out.append((cu + (r - w) * su, cv + (r - w) * sv))
+        return out
 
     def _extent(self, u: float, inset: float, radius: float):
         """(start, end) along v, at u, of the outline moved in by inset with corners of radius."""
@@ -607,18 +832,27 @@ class SignDesign:
         shells = {f: _Shells() for f in FILAMENTS}
         base = shells[p.base_fil]
         outline = rounded_outline(U, V, self.r)
+
+        def side(z0, z1):                                       # the outline at each bend of the side
+            return [(z, self.inset_outline(outline, self.edge_inset(z))) for z in self.edge_levels(z0, z1)]
+
         if self.pockets:                                        # the back: pockets underneath, ...
             holes = [self.to_uv(x, y) + (self.pocket_r,) for x, y in self.pockets]
-            base.plate(self.outer_at, sorted({round(u, 9) for u, _ in outline}), holes,
-                       0.0, self.pocket_depth)
-            base.column(outline, self.pocket_depth, T)          # ... and a roof over them
+            extent, core = self.outer_at, outline
+            if self.edge_back[1] > 0:                           # a band round the plate takes the bend
+                wc = self.edge_inset(0.0) + 0.5 * POCKET_CLEAR
+                core = self.inset_outline(outline, wc)
+                extent = lambda u: self._extent(u, wc, max(self.r - wc, 0.0))     # noqa: E731
+                base.ring_loft(side(0.0, self.pocket_depth), core)
+            base.plate(extent, sorted({round(u, 9) for u, _ in core}), holes, 0.0, self.pocket_depth)
+            base.loft(side(self.pocket_depth, T))               # ... and a roof over them
         else:
-            base.column(outline, 0.0, T)
+            base.loft(side(0.0, T))
         for rim, hole, centre in self.tabs:                     # eyelets, as thick as the back
             rim, hole = ([self.to_uv(x, y) for x, y in pts] for pts in (rim, hole))
             if not self.vertical:                               # mirrored: back to anticlockwise
                 rim, hole = rim[::-1], hole[::-1]
-            base.ring(rim, hole, 0.0, T, self.to_uv(*centre))
+            base.ring(rim, hole, 0.0, self.tab_top, self.to_uv(*centre))
 
         half = 0.5 * self.pitch
         zc = top - self.cap                         # the flanks' colours stop here
@@ -683,7 +917,7 @@ class SignDesign:
         if b > 0:                                               # the frame, flush with the crests
             inner = ([(u, self.ends_at(u)[0]) for u in edge_u]
                      + [(u, self.ends_at(u)[1]) for u in reversed(edge_u)])
-            base.ring(outline, inner, T, top)
+            base.ring_loft(side(T, top), inner)
         self.flat_area = self.fill_volume = 0.0
         if p.ridges_where != EVERYWHERE:
             self._fill_grooves(shells, edge_u)
@@ -826,9 +1060,20 @@ class SignDesign:
         if self.pockets:
             vol -= len(self.pockets) * math.pi * self.pocket_r ** 2 * self.pocket_depth
 
+        def inset_area(w):                                      # of the outline moved in by w
+            return (self.U - 2 * w) * (self.V - 2 * w) - cut * max(self.r - w, 0.0) ** 2
+        # chamfers and roundings, in the facets they are built with: back, roof and frame each have their own
+        splits = [0.0] + ([self.pocket_depth] if self.pockets else []) + [self.T, self.top]
+        zs = sorted({z for a, c in zip(splits, splits[1:]) for z in self.edge_levels(a, c)})
+        ws = [self.edge_inset(z) for z in zs]
+        for za, zb, wa, wb in zip(zs, zs[1:], ws, ws[1:]):
+            if wa > 0 or wb > 0:
+                vol -= (zb - za) * (6.0 * inset_area(0.0) - inset_area(wa) - 4.0 * inset_area(0.5 * (wa + wb))
+                                    - inset_area(wb)) / 6.0
+
         def area(pts):                                          # of an outline, by its corners
             return 0.5 * abs(sum(a[0] * c[1] - c[0] * a[1] for a, c in zip(pts, pts[1:] + pts[:1])))
-        return vol + sum(area(rim) - area(hole) for rim, hole, _ in self.tabs) * self.T
+        return vol + sum(area(rim) - area(hole) for rim, hole, _ in self.tabs) * self.tab_top
 
     def shape_name(self) -> str:
         if self.r <= 1e-9:
@@ -874,6 +1119,23 @@ class SignDesign:
         if not fits:
             self.warnings.append(f"The sign ({across:.4g} × {up:.4g} mm) is bigger than the "
                                  f"printer bed ({p.bed_x:g} × {p.bed_y:g} mm).")
+        if p.face_down:
+            if self.flank_angle < 45.0 - 1e-9:
+                self.warnings.append(
+                    f"Face down, the ridge flanks hang over the bed at only {self.flank_angle:.0f}° from "
+                    f"flat, so they may droop. Print it face up, or use a viewing angle of 45° or less.")
+            stripe = self.c + self.layer * self.s / self.h        # a ridge top, half way up the first layer
+            self.notes.append(
+                f"Face down, the first layer is the frame and the ridge tops: stripes about {stripe:.1f} mm "
+                f"wide. A well-levelled, clean bed helps them stick.")
+            if self.tabs:
+                self.notes.append("Printed face down, the eyelets are as thick as the whole sign, so they "
+                                  "rest on the bed.")
+        bed_edge = self.edge_face if p.face_down else self.edge_back
+        if bed_edge[0] == ROUNDED and bed_edge[1] > 0:
+            self.notes.append(
+                "A rounded edge against the bed starts out almost flat, so its lowest part overhangs and may "
+                "sag a little. A chamfillet looks almost the same and never overhangs more than 45°.")
         if p.ridges_where != EVERYWHERE and self.flat_share() < 0.03:
             self.notes.append(
                 "Hardly any grooves could be filled in: the two messages have different colours behind "
@@ -917,8 +1179,9 @@ class SignDesign:
         p = self.p
         if self.pockets:
             n = len(self.pockets)
+            where = ", side by side in the middle" if p.mount_count == FOUR_IN_MIDDLE else ""
             return (f"{n} pocket{'s' if n > 1 else ''} in the back for {p.magnet_d:g} × {p.magnet_t:g} "
-                    f"mm magnets: {2 * self.pocket_r:.1f} mm across, {self.pocket_depth:.1f} mm deep")
+                    f"mm magnets{where}: {2 * self.pocket_r:.1f} mm across, {self.pocket_depth:.1f} mm deep")
         if self.tabs:
             where = ("at the top and bottom" if len(self.tabs) == 2 and not self.reach[0]
                      else "at each side" if len(self.tabs) == 2 else "at the top")
@@ -979,6 +1242,8 @@ class SignDesign:
                 out[f"Message {k + 1}"] = f"“{self.label(k)}” {size}, seen {self.seen(k)}"
         if self.mounting():
             out["Mounting"] = self.mounting()
+        if self.edges():
+            out["Edges"] = self.edges()
         if self.cap > 0:
             out["Ridge tops"] = (f"top {self.cap:.2f} mm in filament {p.crest_fil}: a plain stripe "
                                  f"over {self.crest_share():.0%} of each line")
@@ -991,4 +1256,33 @@ class SignDesign:
             f"{self.volumes[f] * PLA_DENSITY / 1000.0:.1f} g filament {f}" for f in sorted(self.volumes))
         out["Printer bed"] = ("does not fit" if not self.fits_bed
                               else "fits turned a quarter turn" if self.turn_on_bed else "fits")
+        out["Printer bed"] += "; printed face down, the back on top" if p.face_down else ""
         return out
+
+    def edges(self) -> str:
+        """The chamfers or roundings of the outer edges in words; empty if both are square."""
+        def say(edge):
+            style, size = edge
+            if size <= 0:
+                return "square"
+            return {CHAMFER: f"a {size:.3g} mm chamfer", ROUNDED: f"rounded, {size:.3g} mm",
+                    CHAMFILLET: f"a chamfillet, {size:.3g} mm radius, nothing over 45°"}[style]
+        if self.edge_face[1] <= 0 and self.edge_back[1] <= 0:
+            return ""
+        return f"round the face {say(self.edge_face)}; round the back {say(self.edge_back)}"
+
+    def print_matrix(self) -> np.ndarray:
+        """4 x 4 placement of the sign as it is exported to print.
+
+        Face down if asked - a half turn about the x axis puts the face on the
+        bed - and then a quarter turn if that is what makes it fit the bed.
+        """
+        m = np.identity(4)
+        if self.p.face_down:
+            m = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0],
+                          [0.0, 0.0, -1.0, self.top], [0.0, 0.0, 0.0, 1.0]])
+        if self.turn_on_bed:
+            q = np.identity(4)
+            q[:2, :2] = [[0.0, -1.0], [1.0, 0.0]]
+            m = q @ m
+        return m
