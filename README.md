@@ -117,7 +117,7 @@ and the panel on the right gives the sizes, colour changes and filament used, wi
 * Print with no supports, flat on its back with the ridges up – or face down, if you chose that.
   Magnet pockets bridge over on their own face up, and are open at the top face down.
 * The colours only meet in the ridges, so all the filament changes are in those layers – about 20
-  for the default sign. The back is one colour.
+  for the dishwasher example. The back is one colour.
 * Face down, the first layer is the frame and the thin ridge tops, so a clean, level bed matters.
   The ridges print without supports while their flanks are 45° or steeper (a viewing angle of 45°
   or less).

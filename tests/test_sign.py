@@ -23,6 +23,19 @@ from lenticular.threemf import read_3mf, write_3mf  # noqa: E402
 from lenticular.viewing import angle_to_use, seen_angles  # noqa: E402
 
 
+# The tests were written for the sign the app started from before 1.5 - a plain white 200 x 60 mm
+# CLEAN / DIRTY sign with square edges, printed face up, nothing built in - and P() is that sign,
+# with any changes given.  The app's own defaults are checked on their own in main().
+BASE = dict(font1="Arial", dx1=0.0, font2="Arial", spacing2=0.0, dx2=0.0, margin=4.0, width=200.0,
+            height=60.0, roundness=0.0, base_thickness=2.0, edge_face=0, edge_face_size=1.0, edge_back=0,
+            edge_back_size=0.6, mount=0, magnet_d=10.0, ridges_where=0, color1="#F3F1E8", color2="#2FA24F",
+            color3="#D8362B", color4="#2B2E34", base_fil=1, bed_y=256.0, face_down=False)
+
+
+def P(**changes) -> SignParams:
+    return SignParams(**{**BASE, **changes})
+
+
 def look(d: SignDesign, direction, turned=False, px=0.25):
     """What an eye far away in ``direction`` sees: filament numbers on a grid.
 
@@ -201,28 +214,28 @@ def check_shapes(d: SignDesign):
     """Round outlines: corners, semicircular ends, on the way to a circle, a circle."""
     for roundness, label in ((0.4, "rounded corners"), (1.0, "semicircular ends"),
                              (1.5, "half way to a circle"), (2.0, "circle")):
-        check_views(check_meshes(SignParams(roundness=roundness), label), label)
-    pill, disc = SignDesign(SignParams(roundness=1.0)), SignDesign(SignParams(roundness=2.0))
+        check_views(check_meshes(P(roundness=roundness), label), label)
+    pill, disc = SignDesign(P(roundness=1.0)), SignDesign(P(roundness=2.0))
     assert (pill.W, pill.H, pill.r) == (200.0, 60.0, 30.0) and pill.shape_name() == "semicircular ends"
     assert (disc.W, disc.H, disc.r) == (200.0, 200.0, 100.0) and disc.shape_name() == "a circle"
     assert pill.cap_mm[0] < d.cap_mm[0]                   # letters shrink to stay inside round ends
     assert any("height is 200 mm" in note for note in disc.notes), disc.notes
-    check_views(check_meshes(SignParams(roundness=1.0, ridge_dir=1, flip=False), "round ends, upright ridges"),
+    check_views(check_meshes(P(roundness=1.0, ridge_dir=1, flip=False), "round ends, upright ridges"),
                 "round ends, left / right", need=0.80)
-    check_views(check_meshes(SignParams(width=60.0, height=200.0, roundness=1.0, text_dir1=1, text_dir2=1),
+    check_views(check_meshes(P(width=60.0, height=200.0, roundness=1.0, text_dir1=1, text_dir2=1),
                              "tall sign, round ends"), "tall, round ends", need=0.80)
-    check_meshes(SignParams(roundness=0.05), "corners tighter than the frame")
-    check_meshes(SignParams(roundness=2.0, frame=0.0, width=100.0), "circle, no frame")
-    check_meshes(SignParams(roundness=1.0, text_fil1=1, back_fil1=2, text_fil2=1, back_fil2=3,
+    check_meshes(P(roundness=0.05), "corners tighter than the frame")
+    check_meshes(P(roundness=2.0, frame=0.0, width=100.0), "circle, no frame")
+    check_meshes(P(roundness=1.0, text_fil1=1, back_fil1=2, text_fil2=1, back_fil2=3,
                             base_fil=2, crest_fil=0), "round ends, coloured grounds, shared tops")
-    check_meshes(SignParams(roundness=2.0, width=60.0, height=60.0, pitch=5.0), "small circle, wide ridges")
+    check_meshes(P(roundness=2.0, width=60.0, height=60.0, pitch=5.0), "small circle, wide ridges")
 
 
 def check_mounting():
     """Magnet pockets in the back, and eyelets to hang the sign by."""
-    one = check_meshes(SignParams(mount=1), "one magnet in the middle, to spin the sign on")
+    one = check_meshes(P(mount=1), "one magnet in the middle, to spin the sign on")
     assert one.pockets == [(0.0, 0.0)] and "1 pocket " in one.mounting()
-    mag = check_meshes(SignParams(mount=1, mount_count=2), "two magnets")
+    mag = check_meshes(P(mount=1, mount_count=2), "two magnets")
     assert len(mag.pockets) == 2 and abs(mag.pocket_depth - 2.2) < 1e-9 and abs(mag.pocket_r - 5.1) < 1e-9
     assert mag.T >= mag.pocket_depth + 0.6 - 1e-9 and any("magnet pockets" in n for n in mag.notes)
     assert "2 pockets" in mag.info()["Mounting"]
@@ -236,11 +249,11 @@ def check_mounting():
                       (dict(mount_count=4, roundness=2.0, width=120.0), "four magnets on a circle"),
                       (dict(mount_count=2, roundness=1.0, ridge_dir=1), "two magnets, round ends, upright ridges"),
                       (dict(mount_count=4, roundness=0.5, magnet_d=6.0, magnet_t=3.0), "four small thick magnets")):
-        m = check_meshes(SignParams(mount=1, **kw), label)
+        m = check_meshes(P(mount=1, **kw), label)
         assert len(m.pockets) == kw["mount_count"], (label, m.pockets, m.warnings)
         for x, y in m.pockets:
             assert abs(heights_at(m, x + 0.013, y + 0.021)[0] - m.pocket_depth) < 1e-9, label
-    mid4 = check_meshes(SignParams(mount=1, mount_count=5, magnet_d=6.0), "four small magnets together in the middle")
+    mid4 = check_meshes(P(mount=1, mount_count=5, magnet_d=6.0), "four small magnets together in the middle")
     k = mid4.pocket_r + 0.6                               # side by side, a 1.2 mm wall between them
     assert sorted(mid4.pockets) == sorted((sx * k, sy * k) for sx in (-1, 1) for sy in (-1, 1)), mid4.pockets
     assert "4 pockets" in mid4.mounting() and "side by side in the middle" in mid4.mounting()
@@ -249,28 +262,28 @@ def check_mounting():
     assert heights_at(mid4, 0.013, 0.021)[0] == 0.0       # solid in the middle of them ...
     assert heights_at(mid4, k + 0.013, 0.021)[0] == 0.0   # ... and in the wall between two
     check_views(mid4, "four magnets in the middle")
-    check_meshes(SignParams(mount=1, mount_count=5, magnet_d=8.0, roundness=2.0, width=80.0, edge_back=3,
+    check_meshes(P(mount=1, mount_count=5, magnet_d=8.0, roundness=2.0, width=80.0, edge_back=3,
                             ridge_dir=1), "four magnets in the middle of a circle, chamfillet back")
-    small = SignDesign(SignParams(mount=1, mount_count=5, width=40.0, height=20.0))
+    small = SignDesign(P(mount=1, mount_count=5, width=40.0, height=20.0))
     assert not small.pockets and any("4 magnets of 10 mm do not fit" in w for w in small.warnings)
-    crowded = SignDesign(SignParams(mount=1, mount_count=4, magnet_d=30.0))
+    crowded = SignDesign(P(mount=1, mount_count=4, magnet_d=30.0))
     assert not crowded.pockets and any("do not fit" in w for w in crowded.warnings)
 
-    hung = check_meshes(SignParams(mount=2, mount_count=1), "eyelets, top and bottom")
+    hung = check_meshes(P(mount=2, mount_count=1), "eyelets, top and bottom")
     assert len(hung.tabs) == 2 and hung.reach == (0.0, 8.5), hung.reach
     (_, _, (cx, cy)) = hung.tabs[0]
     assert heights_at(hung, cx + 0.013, cy + 0.021) == []                             # the hole is open
     rim = heights_at(hung, cx + 3.5, cy + 0.021)
     assert rim[0] == 0.0 and abs(rim[-1] - hung.T) < 1e-9                             # its rim is solid
-    assert len(check_meshes(SignParams(mount=2, mount_count=1, flip=False), "one eyelet").tabs) == 1
-    side = check_meshes(SignParams(mount=2, mount_count=2), "eyelets at the sides")
+    assert len(check_meshes(P(mount=2, mount_count=1, flip=False), "one eyelet").tabs) == 1
+    side = check_meshes(P(mount=2, mount_count=2), "eyelets at the sides")
     assert side.reach == (8.5, 0.0) and "each side" in side.mounting()
-    wide = SignDesign(SignParams(mount=2, mount_count=2, width=250.0))
+    wide = SignDesign(P(mount=2, mount_count=2, width=250.0))
     assert not wide.fits_bed and any("267" in w for w in wide.warnings), wide.warnings
     for kw, label in ((dict(roundness=2.0, width=120.0, mount_count=1), "eyelets on a circle"),
                       (dict(roundness=1.0, mount_count=2), "eyelets on round ends"),
                       (dict(roundness=1.0, mount_count=2, ridge_dir=1), "eyelets, upright ridges")):
-        check_meshes(SignParams(mount=2, **kw), label)
+        check_meshes(P(mount=2, **kw), label)
 
 
 def check_pictures(tmp: str):
@@ -310,28 +323,28 @@ def check_pictures(tmp: str):
         box = on[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
         return float(box.mean()), box.shape[1] / box.shape[0]
 
-    d = check_meshes(SignParams(text1="", image1=dot, text2="", image2=tick), "two pictures")
+    d = check_meshes(P(text1="", image1=dot, text2="", image2=tick), "two pictures")
     assert d.label(0) == "dot" and d.label(1) == "tick" and not d.warnings, d.warnings
     filled, aspect = share(d, 0)
     assert abs(filled - math.pi / 4) < 0.02 and abs(aspect - 1.0) < 0.03, (filled, aspect)   # a disc
     assert abs(share(d, 1)[1] - 260 / 170) < 0.05                                             # the tick
     check_views(d, "two pictures")
-    hole, aspect = share(SignDesign(SignParams(text1="", image1=dot, image_invert1=True)), 0)
+    hole, aspect = share(SignDesign(P(text1="", image1=dot, image_invert1=True)), 0)
     assert abs(hole - (1 - math.pi * 70 ** 2 / 200 ** 2)) < 0.02 and abs(aspect - 1.0) < 0.03     # its surround
-    filled, aspect = share(SignDesign(SignParams(text1="", image1=ring)), 0)
+    filled, aspect = share(SignDesign(P(text1="", image1=ring)), 0)
     assert 0.5 < filled < 0.7 and abs(aspect - 1.0) < 0.03, (filled, aspect)                  # an SVG ring
-    word = SignDesign(SignParams(size1=18.0)).shapes[0].rect
+    word = SignDesign(P(size1=18.0)).shapes[0].rect
     for at, wider in ((0, True), (1, True), (2, False), (3, False)):
-        both = SignDesign(SignParams(size1=18.0, image1=dot, image_at1=at))
+        both = SignDesign(P(size1=18.0, image1=dot, image_at1=at))
         assert not both.warnings and both.label(0) == "CLEAN", both.warnings
         box = both.shapes[0].rect
         assert (box.width() > word.width() + 100) == wider and (box.height() > word.height() + 100) != wider
-    check_views(check_meshes(SignParams(image1=tick, image2=dot, image_at2=1), "pictures beside the words"),
+    check_views(check_meshes(P(image1=tick, image2=dot, image_at2=1), "pictures beside the words"),
                 "pictures beside the words")
-    lost = SignDesign(SignParams(image1=os.path.join(tmp, "nothing.png")))
+    lost = SignDesign(P(image1=os.path.join(tmp, "nothing.png")))
     assert any("could not be used" in w for w in lost.warnings) and lost.label(0) == "CLEAN"
     kept = os.path.join(tmp, "kept.lenticular")           # a picture beside its design moves with it
-    save_design(kept, SignParams(image1=dot, image2=os.path.join(tmp, "nothing.png")))
+    save_design(kept, P(image1=dot, image2=os.path.join(tmp, "nothing.png")))
     with open(kept, encoding="utf-8") as fh:
         assert '"image1": "dot.png"' in fh.read()
     assert os.path.samefile(load_design(kept).image1, dot)
@@ -340,8 +353,8 @@ def check_pictures(tmp: str):
 
 def check_layout():
     """Each message moved, spaced and turned on its own."""
-    plain = SignDesign(SignParams(size1=20.0, size2=20.0))
-    moved = SignDesign(SignParams(size1=20.0, size2=20.0, dx1=30.0, dy1=5.0, dx2=-20.0, dy2=-6.0))
+    plain = SignDesign(P(size1=20.0, size2=20.0))
+    moved = SignDesign(P(size1=20.0, size2=20.0, dx1=30.0, dy1=5.0, dx2=-20.0, dy2=-6.0))
     assert not moved.warnings, moved.warnings
     for k, shift in ((0, (30.0, 5.0)), (1, (-20.0, -6.0))):
         was, now = ink_middle(plain.message_image(k), plain), ink_middle(moved.message_image(k), moved)
@@ -349,17 +362,17 @@ def check_layout():
     # message 2 lies upside down on a sign that is turned over, moved the opposite way
     lying, read = ink_middle(moved.images[1], moved), ink_middle(moved.message_image(1), moved)
     assert abs(lying[0] + read[0]) < 0.1 and abs(lying[1] + read[1]) < 0.1
-    check_views(check_meshes(SignParams(size1=20.0, size2=20.0, dx1=30.0, dy1=5.0, dx2=-20.0, dy2=-6.0),
+    check_views(check_meshes(P(size1=20.0, size2=20.0, dx1=30.0, dy1=5.0, dx2=-20.0, dy2=-6.0),
                              "both messages moved"), "moved")
-    far = SignDesign(SignParams(size1=30.0, dx1=80.0))
+    far = SignDesign(P(size1=30.0, dx1=80.0))
     assert any("where it has been moved" in w for w in far.warnings), far.warnings
-    shrunk = SignDesign(SignParams(dx1=40.0))             # Auto shrinks to stay inside where it is
-    assert not shrunk.warnings and shrunk.cap_mm[0] < SignDesign(SignParams()).cap_mm[0]
+    shrunk = SignDesign(P(dx1=40.0))             # Auto shrinks to stay inside where it is
+    assert not shrunk.warnings and shrunk.cap_mm[0] < SignDesign(P()).cap_mm[0]
 
-    wide = SignDesign(SignParams(size1=20.0, spacing1=40.0)).shapes[0].rect.width()
-    tight = SignDesign(SignParams(size1=20.0, spacing1=-10.0)).shapes[0].rect.width()
+    wide = SignDesign(P(size1=20.0, spacing1=40.0)).shapes[0].rect.width()
+    tight = SignDesign(P(size1=20.0, spacing1=-10.0)).shapes[0].rect.width()
     assert tight < plain.shapes[0].rect.width() < wide
-    mixed = check_meshes(SignParams(width=120.0, height=120.0, text_dir2=1), "one across, one stacked")
+    mixed = check_meshes(P(width=120.0, height=120.0, text_dir2=1), "one across, one stacked")
     assert mixed.shapes[0].rect.width() > mixed.shapes[0].rect.height()
     assert mixed.shapes[1].rect.height() > mixed.shapes[1].rect.width()
     check_views(mixed, "across and stacked", need=0.80)
@@ -371,9 +384,9 @@ def check_layout():
 
 def check_flat():
     """Ridges only where needed: grooves filled in where both messages show the same colour."""
-    d = check_meshes(SignParams(ridges_where=2), "ridges only where needed")
+    d = check_meshes(P(ridges_where=2), "ridges only where needed")
     assert 0.3 < d.flat_share() < 0.95 and "Only where needed" in d.info()["Ridges"], d.flat_share()
-    assert SignDesign(SignParams()).flat_area == 0.0
+    assert SignDesign(P()).flat_area == 0.0
     # walk the grooves: filled exactly where the flanks either side of them match
     filled = left = 0
     for j in range(d.n - 1):
@@ -391,20 +404,20 @@ def check_flat():
     # against the frame too, where it matches it: flat right to the edge
     assert abs(heights_at(d, 0.013, -0.5 * d.H + d.b + 0.02)[-1] - d.top) < 1e-9
     check_views(d, "ridges only where needed")
-    grounds = check_meshes(SignParams(ridges_where=2, text_fil1=1, back_fil1=2, text_fil2=1, back_fil2=3,
+    grounds = check_meshes(P(ridges_where=2, text_fil1=1, back_fil1=2, text_fil2=1, back_fil2=3,
                                       base_fil=2), "only where needed, coloured grounds")
     assert 0.0 < grounds.flat_share() < 0.2                # only where two white letters cross
     check_views(grounds, "only where needed, coloured grounds")
-    disc = check_meshes(SignParams(ridges_where=2, roundness=2.0, width=120.0), "only where needed, circle")
+    disc = check_meshes(P(ridges_where=2, roundness=2.0, width=120.0), "only where needed, circle")
     assert disc.flat_share() > 0.5
     check_views(disc, "only where needed, circle")
     for kw, label in ((dict(roundness=1.0, ridge_dir=1, flip=False), "round ends, upright ridges"),
                       (dict(frame=0.0), "no frame"), (dict(crest_fil=0), "shared ridge tops"),
                       (dict(text2=""), "one message"), (dict(roundness=0.3, mount=1, base_fil=4), "magnet, black back"),
                       (dict(text1="", text2=""), "nothing on it")):
-        check_meshes(SignParams(ridges_where=2, **kw), "only where needed, " + label)
+        check_meshes(P(ridges_where=2, **kw), "only where needed, " + label)
     # a block round the messages: every groove inside it is kept, everything outside is flat
-    blk = check_meshes(SignParams(ridges_where=1), "ridges in a block round the messages")
+    blk = check_meshes(P(ridges_where=1), "ridges in a block round the messages")
     first, last, v0, v1 = blk.block
     assert 0.1 < blk.flat_share() < d.flat_share() and "block" in blk.info()["Ridges"]
     for j in range(blk.n - 1):
@@ -418,16 +431,16 @@ def check_flat():
     check_views(blk, "ridges in a block")
     for kw, label in ((dict(roundness=2.0, width=120.0), "circle"), (dict(ridge_dir=1, flip=False), "upright ridges"),
                       (dict(roundness=1.0, mount=2, mount_count=2), "round ends, eyelets")):
-        check_meshes(SignParams(ridges_where=1, **kw), "ridges in a block, " + label)
-    odd = SignDesign(SignParams(ridges_where=1, back_fil2=3))
+        check_meshes(P(ridges_where=1, **kw), "ridges in a block, " + label)
+    odd = SignDesign(P(ridges_where=1, back_fil2=3))
     assert odd.flat_share() < 0.03 and any("Hardly any grooves" in n for n in odd.notes)
-    blank = SignDesign(SignParams(ridges_where=2, text1="", text2=""))
+    blank = SignDesign(P(ridges_where=2, text1="", text2=""))
     assert blank.flat_share() > 0.99                       # nothing to show: all flat
 
 
 def check_edges():
     """Chamfered and rounded outer edges, and printing face down."""
-    cham = check_meshes(SignParams(edge_face=1, edge_face_size=1.0, edge_back=1, edge_back_size=0.6),
+    cham = check_meshes(P(edge_face=1, edge_face_size=1.0, edge_back=1, edge_back_size=0.6),
                         "chamfered face and back")
     x = 0.5 * cham.W                                      # the right-hand side, half way up
     for w in (0.25, 0.5, 0.9):                            # in from the side: 45° slopes, face and back
@@ -436,7 +449,7 @@ def check_edges():
     hs = heights_at(cham, x - 1.2, 0.013)
     assert hs[0] == 0.0 and abs(hs[-1] - cham.top) < 1e-9 and "a 1 mm chamfer" in cham.info()["Edges"]
     check_views(cham, "chamfered edges")
-    rnd = check_meshes(SignParams(edge_face=2, edge_face_size=1.5, edge_back=2, edge_back_size=1.0, roundness=0.4),
+    rnd = check_meshes(P(edge_face=2, edge_face_size=1.5, edge_back=2, edge_back_size=1.0, roundness=0.4),
                        "rounded face and back, rounded corners")
     for w in (0.3, 0.75, 1.2):                            # on the curve, in its flat facets
         top = rnd.top - 1.5 + math.sqrt(1.5 ** 2 - (1.5 - w) ** 2)
@@ -444,15 +457,15 @@ def check_edges():
         hs = heights_at(rnd, 0.5 * rnd.W - w, 0.013)
         assert -0.05 < hs[-1] - top < 1e-9 and -1e-9 < hs[0] - low < 0.05, (w, hs, top, low)
     check_views(rnd, "rounded edges")
-    check_meshes(SignParams(frame=8.0, edge_face=1, edge_face_size=3.0), "chamfer reaching down into the back")
-    check_meshes(SignParams(edge_face=2, edge_face_size=2.0, edge_back=2, edge_back_size=1.5, roundness=2.0,
+    check_meshes(P(frame=8.0, edge_face=1, edge_face_size=3.0), "chamfer reaching down into the back")
+    check_meshes(P(edge_face=2, edge_face_size=2.0, edge_back=2, edge_back_size=1.5, roundness=2.0,
                             width=120.0), "rounded edges on a circle")
-    check_meshes(SignParams(edge_face=1, edge_face_size=2.0, edge_back=2, edge_back_size=1.0, roundness=0.05),
+    check_meshes(P(edge_face=1, edge_face_size=2.0, edge_back=2, edge_back_size=1.0, roundness=0.05),
                  "edges deeper than the corners are round")
-    check_meshes(SignParams(edge_face=2, edge_face_size=1.0, ridge_dir=1, roundness=1.0, ridges_where=1),
+    check_meshes(P(edge_face=2, edge_face_size=1.0, ridge_dir=1, roundness=1.0, ridges_where=1),
                  "rounded face, upright ridges in a block")
 
-    cf = check_meshes(SignParams(edge_back=3, edge_back_size=1.6, edge_face=3, edge_face_size=1.5, roundness=0.3),
+    cf = check_meshes(P(edge_back=3, edge_back_size=1.6, edge_face=3, edge_face_size=1.5, roundness=0.3),
                       "chamfillets, face and back")
     R, knee, reach = 1.6, 1.6 * (1.0 - math.sqrt(0.5)), 1.6 * (2.0 - math.sqrt(2.0))
     assert abs(cf.edge_inset(0.0) - reach) < 1e-9 and abs(cf.edge_inset(cf.top) - 1.5 * (2.0 - math.sqrt(2.0))) < 1e-9
@@ -466,27 +479,27 @@ def check_edges():
             assert zb - za >= abs(wb - wa) - 1e-9, (za, zb, wa, wb)
     assert "chamfillet" in cf.info()["Edges"]
     check_views(cf, "chamfillet edges")
-    check_meshes(SignParams(edge_face=3, edge_face_size=2.0, edge_back=3, edge_back_size=1.0, face_down=True,
+    check_meshes(P(edge_face=3, edge_face_size=2.0, edge_back=3, edge_back_size=1.0, face_down=True,
                             mount=1, mount_count=4, roundness=1.0), "chamfillets, magnets, face down")
-    narrow = SignDesign(SignParams(frame=1.5, edge_face=3, edge_face_size=3.0))
+    narrow = SignDesign(P(frame=1.5, edge_face=3, edge_face_size=3.0))
     assert abs(narrow.edge_inset(narrow.top) - (1.5 - narrow.p.line_width)) < 1e-9     # reach, not size
     assert any("chamfillet round the face is 1.84 mm" in w for w in narrow.warnings), narrow.warnings
 
-    big = SignDesign(SignParams(edge_face=1, edge_face_size=9.0, edge_back=2, edge_back_size=9.0))
+    big = SignDesign(P(edge_face=1, edge_face_size=9.0, edge_back=2, edge_back_size=9.0))
     assert big.edge_back == (2, big.T) and abs(big.edge_face[1] - (big.top - big.T - big.layer)) < 1e-9
     assert sum("rather than the 9 mm set" in w for w in big.warnings) == 2, big.warnings
-    bare = SignDesign(SignParams(frame=0.0, edge_face=2))
+    bare = SignDesign(P(frame=0.0, edge_face=2))
     assert bare.edge_face == (0, 0.0) and any("left square" in w for w in bare.warnings)
 
-    mag = check_meshes(SignParams(mount=1, mount_count=2, edge_back=2, edge_back_size=1.0, edge_face=1),
+    mag = check_meshes(P(mount=1, mount_count=2, edge_back=2, edge_back_size=1.0, edge_face=1),
                        "magnets, rounded back edge")
     for x, y in mag.pockets:                              # the pockets are as they were
         assert abs(heights_at(mag, x + 0.013, y + 0.021)[0] - mag.pocket_depth) < 1e-9
         assert heights_at(mag, x + 5.3, y + 0.021)[0] == 0.0
-    tight = SignDesign(SignParams(mount=1, mount_count=2, mount_inset=1.5, edge_back=1, edge_back_size=1.0))
+    tight = SignDesign(P(mount=1, mount_count=2, mount_inset=1.5, edge_back=1, edge_back_size=1.0))
     assert abs(tight.edge_back[1] - 0.5) < 1e-9 and any("magnet pockets" in w for w in tight.warnings)
 
-    hung = check_meshes(SignParams(mount=2, mount_count=2, edge_back=1, edge_back_size=1.0, edge_face=1),
+    hung = check_meshes(P(mount=2, mount_count=2, edge_back=1, edge_back_size=1.0, edge_face=1),
                         "eyelets, chamfered edges")
     (_, _, (cx, cy)) = hung.tabs[0]
     assert heights_at(hung, cx + 0.013, cy + 0.021) == []                            # the hole is open
@@ -494,7 +507,7 @@ def check_edges():
     assert heights_at(hung, edge - 0.3 * np.sign(cx), cy + 0.021)[0] == 0.0         # joined on the bed
     assert abs(heights_at(hung, edge - 0.3 * np.sign(cx), cy + 15.0)[0] - 0.7) < 1e-9   # the chamfer beside
 
-    down = check_meshes(SignParams(face_down=True, mount=2, mount_count=1, edge_face=1, edge_back=1),
+    down = check_meshes(P(face_down=True, mount=2, mount_count=1, edge_face=1, edge_back=1),
                         "printed face down, eyelets")
     assert down.tab_top == down.top and any("face down" in n.lower() for n in down.notes)
     (_, _, (cx, cy)) = down.tabs[0]
@@ -510,10 +523,10 @@ def check_edges():
     crest = down.bodies[down.p.crest_fil][0] @ m[:3, :3].T + m[:3, 3]
     assert (np.abs(crest[:, 2]) < 1e-9).sum() > 4 * down.n                          # the ridge tops on the bed
     assert "face down" in down.info()["Printer bed"]
-    assert np.allclose(SignDesign(SignParams()).print_matrix(), np.identity(4))
-    steep = SignDesign(SignParams(face_down=True, view_angle=55.0))
+    assert np.allclose(SignDesign(P()).print_matrix(), np.identity(4))
+    steep = SignDesign(P(face_down=True, view_angle=55.0))
     assert any("droop" in w for w in steep.warnings), steep.warnings
-    assert any("rounded edge against the bed" in n for n in SignDesign(SignParams(edge_back=2)).notes)
+    assert any("rounded edge against the bed" in n for n in SignDesign(P(edge_back=2)).notes)
     print("edges and printing face down  OK")
 
 
@@ -529,7 +542,7 @@ def check_viewing():
 
 
 def main():
-    d = check_meshes(SignParams(), "CLEAN / DIRTY, turned over")
+    d = check_meshes(P(), "CLEAN / DIRTY, turned over")
     assert d.n == 18 and abs(d.flank_angle - 60.0) < 1e-9, (d.n, d.flank_angle)
     assert sorted(d.bodies) == [1, 2, 3]
     assert abs(d.cap_mm[0] - d.cap_mm[1]) < 1e-9          # both "as big as fits": same height
@@ -540,31 +553,31 @@ def main():
     assert abs(0.5 * d.c + d.cap / math.tan(math.radians(d.flank_angle)) - d.p.line_width) < 1e-9
     check_views(d, "turned over, from above")
     check_files(d)
-    shared = check_meshes(SignParams(crest_fil=0), "ridge tops half from each message")
+    shared = check_meshes(P(crest_fil=0), "ridge tops half from each message")
     assert max(shared.bodies[f][0][:, 2].max() for f in (2, 3)) == shared.top
     check_views(shared, "shared ridge tops")
 
-    check_views(check_meshes(SignParams(flip=False), "no flip"), "above / below")
-    check_views(check_meshes(SignParams(view_side=1), "from below"), "turned over, from below")
-    check_views(check_meshes(SignParams(ridge_dir=1, flip=False, height=80.0), "upright ridges"),
+    check_views(check_meshes(P(flip=False), "no flip"), "above / below")
+    check_views(check_meshes(P(view_side=1), "from below"), "turned over, from below")
+    check_views(check_meshes(P(ridge_dir=1, flip=False, height=80.0), "upright ridges"),
                 "left / right", need=0.80)
-    check_views(check_meshes(SignParams(ridge_dir=1, view_side=1, height=80.0), "upright, turned"),
+    check_views(check_meshes(P(ridge_dir=1, view_side=1, height=80.0), "upright, turned"),
                 "turned over, from the right", need=0.80)
     for text_dir in (1, 2, 3):
-        p = SignParams(width=60.0, height=200.0, text_dir1=text_dir, text_dir2=text_dir)
+        p = P(width=60.0, height=200.0, text_dir1=text_dir, text_dir2=text_dir)
         check_views(check_meshes(p, f"tall sign, text direction {text_dir}"), f"text direction {text_dir}",
                     need=0.80)
 
     # shared letter colour on two coloured grounds; a third colour for the back
-    p = SignParams(text_fil1=1, back_fil1=2, text_fil2=1, back_fil2=3, base_fil=2)
+    p = P(text_fil1=1, back_fil1=2, text_fil2=1, back_fil2=3, base_fil=2)
     check_views(check_meshes(p, "white letters on green / red"), "coloured grounds")
-    four = check_meshes(SignParams(base_fil=4, crest_fil=4), "a fourth filament for the back and ridge tops")
+    four = check_meshes(P(base_fil=4, crest_fil=4), "a fourth filament for the back and ridge tops")
     assert sorted(four.bodies) == [1, 2, 3, 4] and "back" in four.part_name(4)
     check_views(four, "four filaments")
     check_files(four)
-    check_meshes(SignParams(frame=0.0, crest=0.0, pitch=3.0, view_angle=45.0), "no frame, sharp ridges")
-    check_meshes(SignParams(text2="", size1=20.0, font1="Times New Roman", italic1=True), "one message")
-    check_meshes(SignParams(text1="WET\nPAINT", text2="DRY", width=120.0, height=90.0), "two lines")
+    check_meshes(P(frame=0.0, crest=0.0, pitch=3.0, view_angle=45.0), "no frame, sharp ridges")
+    check_meshes(P(text2="", size1=20.0, font1="Times New Roman", italic1=True), "one message")
+    check_meshes(P(text1="WET\nPAINT", text2="DRY", width=120.0, height=90.0), "two lines")
 
     check_shapes(d)
     check_mounting()
@@ -575,9 +588,16 @@ def main():
     check_edges()
     check_viewing()
 
-    bad = SignDesign(SignParams(crest=2.6))
+    fresh = check_meshes(SignParams(), "the app's own defaults: a new sign")
+    assert fresh.p.face_down and sorted(fresh.bodies) == [1, 2, 3, 4] and len(fresh.pockets) == 1
+    assert not fresh.warnings and not any("rather than" in n for n in fresh.notes), (fresh.warnings, fresh.notes)
+    assert fresh.edge_face == (fresh.p.edge_face, fresh.p.edge_face_size)       # nothing cut down to fit
+    assert fresh.edge_back == (fresh.p.edge_back, fresh.p.edge_back_size)
+    check_views(fresh, "a new sign")
+
+    bad = SignDesign(P(crest=2.6))
     assert bad.errors and not bad.bodies
-    big = SignDesign(SignParams(size1=80.0))
+    big = SignDesign(P(size1=80.0))
     assert any("Message 1" in w for w in big.warnings), big.warnings
     print("all tests passed")
 

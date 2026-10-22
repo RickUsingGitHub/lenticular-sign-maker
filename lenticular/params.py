@@ -22,14 +22,14 @@ class SignParams:
 
     # --- message 1 ----------------------------------------------------------
     text1: str = "CLEAN"
-    font1: str = "Arial"
+    font1: str = "Consolas"
     bold1: bool = True
     italic1: bool = False
     size1: float = 0.0            # height of capital letters (mm); 0 = as big as fits
     spacing1: float = 0.0         # letters spread out (+) or closed up (-), % of their advance
     text_dir1: int = 0            # 0 across, 1 stacked letters, 2 turned (reads upwards),
     #                               3 turned (reads downwards)
-    dx1: float = 0.0              # moved right by this much (mm), as the message is read
+    dx1: float = -1.0             # moved right by this much (mm), as the message is read
     dy1: float = 0.0              # ... and up
     image1: str = ""              # a picture file, shown with the text or instead of it
     image_at1: int = 0            # where it goes: 0 left of the text, 1 right, 2 above, 3 below
@@ -39,13 +39,13 @@ class SignParams:
 
     # --- message 2 ----------------------------------------------------------
     text2: str = "DIRTY"
-    font2: str = "Arial"
+    font2: str = "Consolas"
     bold2: bool = True
     italic2: bool = False
     size2: float = 0.0
-    spacing2: float = 0.0
+    spacing2: float = -3.0
     text_dir2: int = 0
-    dx2: float = 0.0
+    dx2: float = 1.0
     dy2: float = 0.0
     image2: str = ""
     image_at2: int = 0
@@ -53,28 +53,28 @@ class SignParams:
     text_fil2: int = 3
     back_fil2: int = 1
 
-    margin: float = 4.0           # clear space between the frame and the messages (mm)
+    margin: float = 2.5           # clear space between the frame and the messages (mm)
 
     # --- sign ---------------------------------------------------------------
-    width: float = 200.0          # mm, left to right as message 1 is read
-    height: float = 60.0          # mm
-    roundness: float = 0.0        # 0 square corners ... 1 semicircular ends ... 2 a full circle
+    width: float = 145.0          # mm, left to right as message 1 is read
+    height: float = 50.0          # mm
+    roundness: float = 0.56       # 0 square corners ... 1 semicircular ends ... 2 a full circle
     #                               (past 1 the shorter side grows to match the longer one)
-    base_thickness: float = 2.0   # solid back under the ridges (mm)
+    base_thickness: float = 2.8   # solid back under the ridges (mm)
     frame: float = 3.0            # flat rim round the ridges (mm, 0 = none)
-    edge_face: int = SQUARE       # the outer edge round the face: square, chamfered, rounded or
+    edge_face: int = CHAMFILLET   # the outer edge round the face: square, chamfered, rounded or
     #                               a chamfillet (rounded where it meets the side, then a 45° chamfer)
-    edge_face_size: float = 1.0   # how far the chamfer or rounding reaches in and down (mm); for a
+    edge_face_size: float = 2.0   # how far the chamfer or rounding reaches in and down (mm); for a
     #                               chamfillet its radius: it reaches 0.59 x as far in
-    edge_back: int = SQUARE       # the outer edge round the back, likewise
-    edge_back_size: float = 0.6
+    edge_back: int = ROUNDED      # the outer edge round the back, likewise
+    edge_back_size: float = 2.8
 
     # --- mounting -----------------------------------------------------------
-    mount: int = NO_MOUNT         # 1 = pockets in the back for magnets, 2 = eyelets to hang it by
+    mount: int = MAGNETS          # 1 = pockets in the back for magnets, 2 = eyelets to hang it by
     mount_count: int = 1          # magnets: 1 (in the middle, to spin the sign on), 2, 4 (in the
     #                               corners) or FOUR_IN_MIDDLE (smaller ones to spin on, side by side);
     #                               eyelets: 1 or 2
-    magnet_d: float = 10.0        # magnet diameter (mm)
+    magnet_d: float = 18.0        # magnet diameter (mm)
     magnet_t: float = 2.0         # magnet thickness (mm)
     mount_inset: float = 5.0      # from the sign's edge to the edge of a magnet (mm)
     hole_d: float = 4.0           # hole through an eyelet (mm)
@@ -87,26 +87,26 @@ class SignParams:
     pitch: float = 3.0            # ridge spacing (mm) - the size of one picture line
     view_angle: float = 30.0      # degrees off straight-on from which one message shows alone
     crest: float = 0.4            # flat on top of each ridge (mm)
-    ridges_where: int = 0         # 0 = ridges over the whole face; elsewhere the grooves are filled
+    ridges_where: int = WHERE_NEEDED  # 0 = ridges over the whole face; elsewhere the grooves are filled
     #                               in, level with the ridge tops: 1 = ridges in a block round the
     #                               messages, 2 = only where the two messages differ in colour
 
     # --- filaments ----------------------------------------------------------
-    color1: str = "#F3F1E8"
-    color2: str = "#2FA24F"
+    color1: str = "#000000"
+    color2: str = "#FFFF00"
     color3: str = "#D8362B"
-    color4: str = "#2B2E34"
-    base_fil: int = 1             # filament of the back and the frame
+    color4: str = "#FFFFFF"
+    base_fil: int = 4             # filament of the back and the frame
     crest_fil: int = 1            # filament of the top of every ridge; 0 = half from each
     #                               message (fuller colour, but the messages ghost)
 
     # --- printer ------------------------------------------------------------
     bed_x: float = 256.0
-    bed_y: float = 256.0
+    bed_y: float = 251.0
     layer_height: float = 0.2     # the sign is a whole number of these thick
     line_width: float = 0.42      # the slicer's line width: nothing narrower gets printed
     min_detail: float = 0.5       # shortest piece of colour along a ridge (mm)
-    face_down: bool = False       # print it face down on the bed, the back on top
+    face_down: bool = True        # print it face down on the bed, the back on top
 
     # ---------------------------------------------------------------- utils
     def copy(self) -> "SignParams":
