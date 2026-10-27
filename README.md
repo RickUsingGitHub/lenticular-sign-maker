@@ -68,6 +68,8 @@ The app lays out both messages, shows the sign in 3D from each side, and exports
   On Windows, `run.bat` sets up a virtual environment in `.venv` the first time and starts the app.
 * **Build the exe yourself:** run `build_exe.bat`. It writes `dist\LenticularSignMaker.exe`.
 
+Lenticular Sign Maker is free. If it has saved you a sign or two, you can [buy me a coffee](https://ko-fi.com/rickapps).
+
 `examples\` holds designs to open: the dishwasher sign with square and with round ends, a spinning
 one on four small magnets with chamfillet edges, a tick and a cross from picture files, an OPEN / CLOSED sign that changes as you walk past, a tall FREE / BUSY sign
 with stacked letters, and a round IN / OUT sign.
