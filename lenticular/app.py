@@ -1320,7 +1320,9 @@ class MainWindow(QMainWindow):
             "<p><b>3D view:</b> left-drag tilt · right-drag / shift-drag pan · wheel zoom · "
             "double-click or F to go back to the chosen view.</p>"
             "<p>Exports are in millimetres, on the back (or face down, if chosen) and ready to "
-            "print.</p>")
+            "print.</p>"
+            "<p>Lenticular Sign Maker is free. If it has saved you a sign or two, you can "
+            "<a href='https://ko-fi.com/rickapps'>buy me a coffee</a>.</p>")
 
     def closeEvent(self, ev):
         if not self._confirm_discard():
