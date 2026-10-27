@@ -8,9 +8,9 @@ import sys
 import time
 
 import numpy as np
-from PySide6.QtCore import QSettings, QSize, Qt, QTimer
-from PySide6.QtGui import (QAction, QColor, QFont, QIcon, QKeySequence, QPainter, QPalette, QPen,
-                           QPixmap, QSurfaceFormat)
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QIcon, QKeySequence, QPainter,
+                           QPalette, QPen, QPixmap, QSurfaceFormat)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QColorDialog, QComboBox, QDialog,
                                QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFontComboBox,
                                QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
@@ -30,6 +30,7 @@ from .viewing import LEAST, SAFETY, angle_to_use, seen_angles
 
 APP_NAME = "Lenticular Sign Maker"
 FILE_EXT = ".lenticular"
+KOFI_URL = "https://ko-fi.com/rickapps"
 MESSAGE_1, MESSAGE_2, PRINT_LAYOUT = 0, 1, 2
 DISPLAY_FOV = 9.0       # a narrow view, as if standing back from the sign
 PRINT_FOV = 30.0
@@ -258,6 +259,13 @@ def glyph_icon(kind: str) -> QIcon:
         p.setPen(pen)
         p.drawPolyline([QPointF(14, 44), QPointF(26, 30), QPointF(34, 38), QPointF(42, 26),
                         QPointF(50, 38)])
+    elif kind == "coffee":
+        p.drawRoundedRect(QRectF(14, 26, 30, 26), 5, 5)              # cup
+        p.drawArc(QRectF(36, 30, 16, 16), -90 * 16, 180 * 16)        # handle, ends on the cup
+        pen.setColor(QColor(240, 163, 86))
+        p.setPen(pen)
+        for x in (21, 29, 37):                                       # steam
+            p.drawLine(QPointF(x, 10), QPointF(x, 20))
     p.end()
     return QIcon(pm)
 
@@ -926,6 +934,13 @@ class MainWindow(QMainWindow):
         vm.addAction(a)
         hm = mb.addMenu("&Help")
         hm.addAction(self.a_about)
+
+        # A coffee cup after Help, for anyone who would like to chip in.
+        self.a_kofi = QAction(glyph_icon("coffee"), "", self)
+        self.a_kofi.setToolTip("Lenticular Sign Maker is free — buy me a coffee")
+        self.a_kofi.setStatusTip("Lenticular Sign Maker is free — buy me a coffee")
+        self.a_kofi.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(KOFI_URL)))
+        mb.addAction(self.a_kofi)
 
     # ============================================================ params
     def _on_param(self, key, value):
