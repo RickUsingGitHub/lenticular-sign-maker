@@ -23,6 +23,7 @@ from .params import (BLOCK, CHAMFER, CHAMFILLET, EVERYWHERE, EYELETS, FILAMENTS,
                      NO_MOUNT, ROUNDED, SQUARE, WHERE_NEEDED, SignParams, load_design, outline_size,
                      save_design)
 from .preview import StripPreview
+from .spinbox import DoubleSpinBox, SpinBox
 from .stl import write_stl
 from .threemf import write_3mf
 from .viewer import Viewer3D, standing_transform
@@ -328,7 +329,7 @@ class AngleHelper(QDialog):
         form = QFormLayout()
 
         def length(key, label, default, tip):
-            s = QDoubleSpinBox()
+            s = DoubleSpinBox()
             s.setRange(0.0, 2000.0)
             s.setDecimals(0)
             s.setSingleStep(5.0)
@@ -573,7 +574,7 @@ class MainWindow(QMainWindow):
         val = getattr(self.params, key)
 
         def spin(k, suffix, special="", prefix=""):
-            s = QDoubleSpinBox()
+            s = DoubleSpinBox()
             s.setDecimals(2)
             s.setRange(lo, hi)
             s.setSingleStep(step)
