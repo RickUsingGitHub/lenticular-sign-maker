@@ -1,0 +1,29 @@
+name: Tests
+
+# Runs on Windows, the app's platform: the reading checks in tests/test_sign.py draw the text with the
+# app's default font, Consolas, which Linux runners don't have (a stand-in font scores slightly lower).
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m tests.test_sign
